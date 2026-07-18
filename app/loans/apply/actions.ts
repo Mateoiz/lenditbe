@@ -125,7 +125,7 @@ export async function submitLoanApplication(formData: FormData) {
     p_rejection_reason: assessment.rejectionReason ?? null,
     p_approved_at:      assessment.approved ? new Date().toISOString() : null,
     p_due_date:         assessment.approved ? dueDateStr : null,
-    p_installments:     JSON.stringify(schedule),
+p_installments:     schedule,
   })
 
   if (error) throw new Error('Failed to create loan: ' + error.message)
