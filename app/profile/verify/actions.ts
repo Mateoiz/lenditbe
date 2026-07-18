@@ -67,22 +67,17 @@ export async function submitVerification(
       .upload(selfiePath, selfie, { upsert: true })
     if (selfieErr) return { ok: false, error: 'Failed to upload selfie: ' + selfieErr.message }
 
-    // Get public URLs
-    const { data: frontUrl }  = supabase.storage.from('kyc-documents').getPublicUrl(frontPath)
-    const { data: backUrl }   = backPath
-      ? supabase.storage.from('kyc-documents').getPublicUrl(backPath)
-      : { data: null }
-    const { data: selfieUrl } = supabase.storage.from('kyc-documents').getPublicUrl(selfiePath)
-
-    // Update borrower record
+    // Store STORAGE PATHS, not public URLs. The bucket is private — actual
+    // viewing access happens later via createSignedUrl() (see getKycDocumentUrls
+    // below), scoped to admins or the owning borrower, and short-lived.
     const { error: updateErr } = await supabase
       .from('borrowers')
       .update({
         id_type:              idType,
         id_number:            idNumber,
-        id_front_image_url:   frontUrl.publicUrl,
-        id_back_image_url:    backUrl?.publicUrl ?? null,
-        id_selfie_url:        selfieUrl.publicUrl,
+        id_front_image_url:   frontPath,
+        id_back_image_url:    backPath,
+        id_selfie_url:        selfiePath,
         data_privacy_consent: true,
         credit_check_consent: true,
         consent_given_at:     new Date().toISOString(),
@@ -96,5 +91,71 @@ export async function submitVerification(
   } catch (err: any) {
     // Catch-all so an unexpected exception never falls through as an opaque digest
     return { ok: false, error: err?.message ?? 'Unexpected error during verification.' }
+  }
+}
+
+const SIGNED_URL_EXPIRY_SECONDS = 60 * 60 // 1 hour
+
+/**
+ * Generates short-lived signed URLs for a borrower's KYC documents.
+ * Callable by:
+ *  - the borrower themselves (viewing their own submitted docs), or
+ *  - an admin (reviewing a borrower's docs for verification)
+ * RLS on `borrowers`/`admins` isn't enough on its own here — this function
+ * enforces the same rule in application code before touching storage.
+ */
+export async function getKycDocumentUrls(
+  borrowerId: string
+): Promise<
+  | { ok: true; urls: { front: string | null; back: string | null; selfie: string | null } }
+  | { ok: false; error: string }
+> {
+  try {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { ok: false, error: 'Not authenticated' }
+
+    const isSelf = user.id === borrowerId
+    let isAdmin = false
+    if (!isSelf) {
+      const { data: admin } = await supabase
+        .from('admins')
+        .select('id')
+        .eq('id', user.id)
+        .maybeSingle()
+      isAdmin = !!admin
+    }
+
+    if (!isSelf && !isAdmin) {
+      return { ok: false, error: 'Not authorized to view these documents' }
+    }
+
+    const { data: borrower, error: borrowerErr } = await supabase
+      .from('borrowers')
+      .select('id_front_image_url, id_back_image_url, id_selfie_url')
+      .eq('id', borrowerId)
+      .maybeSingle()
+
+    if (borrowerErr) return { ok: false, error: 'Failed to load borrower record: ' + borrowerErr.message }
+    if (!borrower) return { ok: false, error: 'Borrower not found' }
+
+    async function sign(path: string | null): Promise<string | null> {
+      if (!path) return null
+      const { data, error } = await supabase.storage
+        .from('kyc-documents')
+        .createSignedUrl(path, SIGNED_URL_EXPIRY_SECONDS)
+      if (error || !data) return null
+      return data.signedUrl
+    }
+
+    const [front, back, selfie] = await Promise.all([
+      sign(borrower.id_front_image_url),
+      sign(borrower.id_back_image_url),
+      sign(borrower.id_selfie_url),
+    ])
+
+    return { ok: true, urls: { front, back, selfie } }
+  } catch (err: any) {
+    return { ok: false, error: err?.message ?? 'Unexpected error fetching documents.' }
   }
 }
