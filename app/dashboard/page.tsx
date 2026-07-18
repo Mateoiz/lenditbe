@@ -4,13 +4,21 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 
 function peso(n: number) {
-  return `\u20b1${n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  return `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
 function formatDate(d: string | null) {
   if (!d) return '—'
   return new Date(d).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })
 }
+
+function daysUntil(d: string | null) {
+  if (!d) return null
+  const diff = Math.ceil((new Date(d).getTime() - Date.now()) / 86400000)
+  return diff
+}
+
+const JOURNEY_STEPS = ['pending', 'approved', 'disbursed', 'active', 'completed'] as const
 
 export default async function DashboardPage() {
   const supabase = await createClient()
@@ -23,7 +31,6 @@ export default async function DashboardPage() {
     redirect('/login')
   }
 
-  // Gatekeeper: Bounce administrators to the admin portal
   const { data: admin } = await supabase
     .from('admins')
     .select('id')
@@ -40,7 +47,6 @@ export default async function DashboardPage() {
     .eq('id', user.id)
     .maybeSingle()
 
-  // Active / most relevant loan (includes 'approved' from automated underwriting)
   const { data: loans } = await supabase
     .from('loans')
     .select('*')
@@ -76,134 +82,208 @@ export default async function DashboardPage() {
   const firstName = borrower?.first_name ?? user.email?.split('@')[0] ?? 'there'
   const isStudent = borrower?.employment_type === 'student'
 
-  // Compute algorithmic credit limit display based on student vs. working rules
-  const getCreditLimitText = () => {
-    if (!borrower) return peso(0)
-    if (isStudent) {
-      const completedCount = loans?.filter(l => l.status === 'completed').length || 0
-      const cap = completedCount === 0 ? 500 : completedCount === 1 ? 1000 : 1500
-      return peso(cap)
-    }
-    return peso(borrower.credit_limit || (borrower.monthly_income ? borrower.monthly_income * 0.15 : 2500))
+  const completedCount = loans?.filter(l => l.status === 'completed').length || 0
+  const creditLimitValue = isStudent
+    ? (completedCount === 0 ? 500 : completedCount === 1 ? 1000 : 1500)
+    : (borrower?.credit_limit || (borrower?.monthly_income ? borrower.monthly_income * 0.15 : 2500))
+
+  const outstandingPrincipal = (loans ?? [])
+    .filter(l => ['approved', 'disbursed', 'active', 'overdue'].includes(l.status))
+    .reduce((sum, l) => sum + Number(l.principal_amount), 0)
+
+  const utilizationPct = creditLimitValue > 0
+    ? Math.min(100, Math.round((outstandingPrincipal / creditLimitValue) * 100))
+    : 0
+  const availableCredit = Math.max(0, creditLimitValue - outstandingPrincipal)
+
+  const RADIUS = 42
+  const CIRC = 2 * Math.PI * RADIUS
+  const ringOffset = CIRC - (utilizationPct / 100) * CIRC
+  const ringColor = utilizationPct >= 90 ? 'var(--magenta)' : utilizationPct >= 60 ? 'var(--marigold)' : 'var(--teal)'
+
+  const journeyStatus = activeLoan?.status === 'overdue' ? 'active' : (activeLoan?.status ?? null)
+  const journeyIndex = journeyStatus ? JOURNEY_STEPS.indexOf(journeyStatus as any) : -1
+
+  let paidSoFar = 0
+  if (activeLoan) {
+    const { data: loanPayments } = await supabase
+      .from('payments')
+      .select('amount')
+      .eq('loan_id', activeLoan.id)
+    paidSoFar = (loanPayments ?? []).reduce((s, p) => s + Number(p.amount), 0)
   }
+  const repaymentPct = activeLoan
+    ? Math.min(100, Math.round((paidSoFar / Number(activeLoan.total_repayable)) * 100))
+    : 0
+
+  const dueDays = nextInstallment ? daysUntil(nextInstallment.due_date) : null
+  const isUrgent = dueDays !== null && dueDays <= 3
 
   return (
     <>
-<style>{`
-  @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=JetBrains+Mono:wght@400;500&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=Space+Mono:wght@400;700&family=Inter:wght@400;500;600;700&display=swap');
 
-  :root {
-    /* Crisp, high-contrast digital canvas (replaces earthy cream) */
-    --bg:        #F4F6FB;
-    --bg-2:      #EAEEF6;
-    --bg-card:   #FFFFFF;
-    
-    /* Deep slate ink for punchier readability */
-    --ink:       #0F172A;
-    --ink-2:     #334155;
-    --ink-3:     #64748B;
-    --ink-4:     #94A3B8;
-    
-    /* POPPY ELECTRIC VIOLET (Drives action and digital trust) */
-    --blue:      #4F46E5;
-    --blue-mid:  #6366F1;
-    --blue-bg:   #EEF2FF;
-    --blue-bdr:  #C7D2FE;
-    
-    /* Subtler, crisper borders */
-    --line:      rgba(15, 23, 42, 0.06);
-    --line-md:   rgba(15, 23, 42, 0.12);
-    
-    /* Vibrant Amber for urgent KYC alerts */
-    --amber:     #D97706;
-    --amber-bg:  #FFFBEB;
-    --amber-bdr: #FDE68A;
-    
-    /* Neo-Mint Green for money, approval, and paid status */
-    --green:     #059669;
-    --green-bg:  #ECFDF5;
-    --green-bdr: #6EE7B7;
-    
-    /* Clean Coral/Red for overdue/rejection */
-    --red:       #E11D48;
-    --red-bg:    #FFF1F2;
-    --red-bdr:   #FECDD3;
-  }
+        :root {
+          --paper:     #FFFDF7;
+          --paper-2:   #F5F0E4;
+          --card:      #FFFFFF;
 
-  .font-serif { font-family: 'DM Serif Display', Georgia, serif; }
-  .font-mono  { font-family: 'JetBrains Mono', monospace; }
-  
-  /* Global sans-serif upgrade for a slick app feel */
-  body { font-family: 'Plus Jakarta Sans', -apple-system, sans-serif; }
+          --ink:       #14110F;
+          --ink-2:     #3A362F;
+          --ink-3:     #6B655A;
+          --ink-4:     #9C9484;
 
-  .card {
-    background: var(--bg-card);
-    border: 1px solid var(--line);
-    border-radius: 20px;
-    box-shadow: 0 10px 30px -5px rgba(15, 23, 42, 0.04), 0 4px 10px -3px rgba(15, 23, 42, 0.02);
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-  }
-  .card:hover {
-    box-shadow: 0 20px 35px -5px rgba(99, 102, 241, 0.08);
-  }
+          --teal:      #0B5D52;
+          --teal-dark: #073F38;
+          --teal-bg:   #E5F1EE;
+          --teal-bdr:  #B9D9D2;
 
-  /* THE HIGH-CONVERTING "POPPY" CTA BUTTON */
-  .btn-primary {
-    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-    padding: 12px 24px; border-radius: 12px;
-    background: linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%);
-    color: #fff; font-size: 14px; font-weight: 600;
-    text-decoration: none;
-    border: none;
-    box-shadow: 0 4px 14px 0 rgba(99, 102, 241, 0.39);
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-  .btn-primary:hover { 
-    background: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%);
-    transform: translateY(-2px) scale(1.01); 
-    box-shadow: 0 6px 20px 0 rgba(99, 102, 241, 0.55);
-  }
-  .btn-primary:active {
-    transform: translateY(0) scale(0.99);
-  }
+          --marigold:      #F5A623;
+          --marigold-dark: #B87814;
+          --marigold-bg:   #FDF0DA;
+          --marigold-bdr:  #F0CE93;
 
-  .btn-secondary {
-    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-    padding: 12px 22px; border-radius: 12px;
-    background: var(--bg-card);
-    color: var(--ink-2); font-size: 14px; font-weight: 600;
-    text-decoration: none;
-    border: 1px solid var(--line-md);
-    box-shadow: 0 2px 5px rgba(15, 23, 42, 0.02);
-    transition: all 0.2s ease;
-  }
-  .btn-secondary:hover { 
-    background: var(--bg-2); 
-    color: var(--ink);
-    border-color: var(--ink-3);
-  }
-`}</style>
+          --magenta:     #C81E5C;
+          --magenta-bg:  #FBE7EF;
+          --magenta-bdr: #EFB4CB;
 
-      <div className="min-h-screen" style={{ background: 'var(--bg)' }}>
-        {/* Top bar */}
+          --line:      rgba(20, 17, 15, 0.10);
+          --line-md:   rgba(20, 17, 15, 0.18);
+        }
+
+        .font-display { font-family: 'Fraunces', Georgia, serif; }
+        .font-mono    { font-family: 'Space Mono', monospace; }
+        body { font-family: 'Inter', -apple-system, sans-serif; }
+
+        /* --- Ledger card with punch-hole tear line --- */
+        .ledger-card {
+          background: var(--card);
+          border: 1.5px solid var(--line-md);
+          border-radius: 6px;
+          position: relative;
+        }
+        .punch-line {
+          height: 14px;
+          background-image: radial-gradient(circle, var(--paper) 3.5px, transparent 4px);
+          background-size: 18px 14px;
+          background-position: 9px center;
+          border-bottom: 1.5px dashed var(--line-md);
+        }
+
+        .btn-primary {
+          display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+          padding: 12px 24px; border-radius: 4px;
+          background: var(--marigold);
+          color: var(--teal-dark); font-size: 14px; font-weight: 700;
+          text-decoration: none; border: 1.5px solid var(--ink);
+          box-shadow: 3px 3px 0 var(--ink);
+          transition: all 0.15s ease;
+        }
+        .btn-primary:hover { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 var(--ink); }
+        .btn-primary:active { transform: translate(1px, 1px); box-shadow: 1px 1px 0 var(--ink); }
+
+        .btn-secondary {
+          display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+          padding: 12px 22px; border-radius: 4px;
+          background: var(--card);
+          color: var(--ink-2); font-size: 14px; font-weight: 600;
+          text-decoration: none; border: 1.5px solid var(--line-md);
+          transition: all 0.15s ease;
+        }
+        .btn-secondary:hover { border-color: var(--teal); color: var(--teal); background: var(--teal-bg); }
+
+        /* --- Ink stamp badge --- */
+        .stamp {
+          display: inline-flex; align-items: center; gap: 5px;
+          font-family: 'Space Mono', monospace; font-size: 11px; font-weight: 700;
+          text-transform: uppercase; letter-spacing: 0.06em;
+          padding: 4px 10px; border-radius: 3px;
+          border: 2px solid; transform: rotate(-3deg);
+          mix-blend-mode: multiply;
+        }
+
+        /* --- Credit utilization ring --- */
+        .ring-wrap { position: relative; width: 108px; height: 108px; flex-shrink: 0; }
+        .ring-wrap svg { transform: rotate(-90deg); }
+        .ring-track { fill: none; stroke: var(--paper-2); stroke-width: 9; }
+        .ring-fill  { fill: none; stroke-width: 9; stroke-linecap: butt; transition: stroke-dashoffset 0.6s cubic-bezier(0.4,0,0.2,1); }
+        .ring-center {
+          position: absolute; inset: 0; display: flex; flex-direction: column;
+          align-items: center; justify-content: center;
+        }
+
+        /* --- Loan journey stepper --- */
+        .journey-track { display: flex; align-items: center; }
+        .journey-step { display: flex; flex-direction: column; align-items: center; flex: 1; position: relative; }
+        .journey-dot {
+          width: 22px; height: 22px; border-radius: 3px;
+          display: flex; align-items: center; justify-content: center;
+          font-size: 10px; font-weight: 700; font-family: 'Space Mono', monospace;
+          border: 2px solid var(--line-md); background: var(--card); color: var(--ink-4);
+          z-index: 1; transition: all 0.3s ease;
+        }
+        .journey-dot.done { background: var(--teal); border-color: var(--teal-dark); color: #fff; }
+        .journey-dot.current {
+          background: var(--marigold); border-color: var(--ink); color: var(--teal-dark);
+        }
+        .journey-line {
+          position: absolute; top: 11px; left: 50%; width: 100%; height: 2px;
+          background: var(--line-md); z-index: 0;
+        }
+        .journey-line.done { background: var(--teal); }
+        .journey-step:last-child .journey-line { display: none; }
+        .journey-label {
+          font-size: 10px; font-family: 'Space Mono', monospace; text-transform: uppercase;
+          letter-spacing: 0.05em; color: var(--ink-4); margin-top: 8px; text-align: center;
+        }
+        .journey-label.active { color: var(--ink-2); font-weight: 700; }
+
+        .countdown-pill {
+          display: inline-flex; align-items: center; gap: 6px;
+          font-family: 'Space Mono', monospace; font-size: 12px; font-weight: 700;
+          padding: 4px 10px; border-radius: 3px; border: 1.5px solid;
+        }
+
+        .progress-track { width: 100%; height: 10px; border-radius: 2px; background: var(--paper-2); overflow: hidden; border: 1px solid var(--line-md); }
+        .progress-fill { height: 100%; background: repeating-linear-gradient(135deg, var(--teal), var(--teal) 8px, var(--teal-dark) 8px, var(--teal-dark) 16px); transition: width 0.6s ease; }
+
+        .seal-strip {
+          display: flex; flex-wrap: wrap; gap: 24px; align-items: center; justify-content: center;
+          padding: 20px; border-radius: 6px; background: var(--paper-2); border: 1.5px dashed var(--line-md);
+        }
+        .seal-item {
+          display: flex; align-items: center; gap: 6px;
+          font-size: 11px; font-family: 'Space Mono', monospace; color: var(--ink-3);
+        }
+      `}</style>
+
+      <div className="min-h-screen" style={{ background: 'var(--paper)' }}>
         <header
           className="flex items-center justify-between px-6 sm:px-10 py-5"
-          style={{ borderBottom: '1px solid var(--line)' }}
+          style={{ borderBottom: '2px solid var(--ink)', background: 'var(--paper)' }}
         >
           <Link
             href="/"
-            className="font-serif text-xl"
-            style={{ fontFamily: "'DM Serif Display', Georgia, serif", color: 'var(--ink)' }}
+            className="font-display text-2xl"
+            style={{ color: 'var(--ink)', fontWeight: 600 }}
           >
-            Lendit<span style={{ color: 'var(--blue-mid)', fontStyle: 'italic' }}>Be</span>
+            Lendit
+            <span
+              style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                width: 30, height: 30, borderRadius: '50%', background: 'var(--marigold)',
+                color: 'var(--teal-dark)', fontSize: 15, fontWeight: 700, marginLeft: 2,
+                border: '1.5px solid var(--ink)', verticalAlign: 'middle',
+              }}
+            >
+              Be
+            </span>
           </Link>
           <div className="flex items-center gap-3">
             {isStudent && (
-              <span 
-                className="text-xs font-mono px-2.5 py-1 rounded-md uppercase tracking-wider hidden sm:inline"
-                style={{ background: 'var(--blue-bg)', color: 'var(--blue-mid)', border: '1px solid var(--blue-bdr)' }}
-              >
-                Student Account
+              <span className="stamp hidden sm:inline-flex" style={{ color: 'var(--teal-dark)', borderColor: 'var(--teal)' }}>
+                Student
               </span>
             )}
             <span className="text-sm hidden sm:inline" style={{ color: 'var(--ink-3)' }}>
@@ -212,7 +292,7 @@ export default async function DashboardPage() {
             <form action="/auth/signout" method="post">
               <button
                 type="submit"
-                className="text-sm font-medium px-3 py-1.5 rounded-lg"
+                className="text-sm font-medium px-3 py-1.5 rounded"
                 style={{ color: 'var(--ink-3)' }}
               >
                 Sign out
@@ -222,26 +302,25 @@ export default async function DashboardPage() {
         </header>
 
         <main className="max-w-5xl mx-auto px-6 sm:px-10 py-10">
-          <h1 className="font-serif text-3xl mb-1" style={{ color: 'var(--ink)' }}>
+          <h1 className="font-display text-3xl mb-1" style={{ color: 'var(--ink)', fontWeight: 500 }}>
             Welcome back, {firstName}.
           </h1>
           <p className="text-sm mb-8" style={{ color: 'var(--ink-3)' }}>
             Here&apos;s where things stand with your account.
           </p>
 
-          {/* KYC banner */}
           {kycStatus !== 'verified' && (
             <div
-              className="flex items-center justify-between gap-4 flex-wrap rounded-xl px-5 py-4 mb-8"
+              className="flex items-center justify-between gap-4 flex-wrap px-5 py-4 mb-8 ledger-card"
               style={{
-                background: kycStatus === 'rejected' ? 'var(--red-bg)' : 'var(--amber-bg)',
-                border: `1px solid ${kycStatus === 'rejected' ? 'var(--red-bdr)' : 'var(--amber-bdr)'}`,
+                background: kycStatus === 'rejected' ? 'var(--magenta-bg)' : 'var(--marigold-bg)',
+                borderColor: kycStatus === 'rejected' ? 'var(--magenta-bdr)' : 'var(--marigold-bdr)',
               }}
             >
               <div>
                 <p
                   className="text-sm font-semibold mb-0.5"
-                  style={{ color: kycStatus === 'rejected' ? 'var(--red)' : 'var(--amber)' }}
+                  style={{ color: kycStatus === 'rejected' ? 'var(--magenta)' : 'var(--marigold-dark)' }}
                 >
                   {kycStatus === 'rejected'
                     ? 'Your verification was not approved'
@@ -259,68 +338,151 @@ export default async function DashboardPage() {
             </div>
           )}
 
-          {/* Summary cards */}
-          <div className="grid sm:grid-cols-3 gap-5 mb-8">
-            <div className="card p-6">
-              <p className="text-xs font-mono uppercase tracking-widest mb-2" style={{ color: 'var(--ink-4)' }}>
-                Credit limit
-              </p>
-              <p className="font-serif text-3xl" style={{ color: 'var(--ink)' }}>
-                {getCreditLimitText()}
-              </p>
-              <span className="text-xs font-mono mt-1 inline-block" style={{ color: 'var(--ink-3)' }}>
-                {isStudent ? 'Allowance-protected micro-cap' : 'Max 15% DTI capacity'}
-              </span>
+          {isUrgent && nextInstallment && activeLoan && (
+            <div
+              className="flex items-center justify-between gap-4 flex-wrap px-5 py-4 mb-8 ledger-card"
+              style={{ background: 'var(--magenta-bg)', borderColor: 'var(--magenta-bdr)' }}
+            >
+              <div>
+                <p className="text-sm font-semibold mb-0.5" style={{ color: 'var(--magenta)' }}>
+                  {dueDays !== null && dueDays < 0
+                    ? `Payment overdue by ${Math.abs(dueDays)} day${Math.abs(dueDays) !== 1 ? 's' : ''}`
+                    : dueDays === 0
+                    ? 'Payment due today'
+                    : `Payment due in ${dueDays} day${dueDays !== 1 ? 's' : ''}`}
+                </p>
+                <p className="text-sm" style={{ color: 'var(--ink-2)' }}>
+                  {peso(Number(nextInstallment.amount_due) - Number(nextInstallment.amount_paid))} for installment #{nextInstallment.installment_number}
+                </p>
+              </div>
+              <Link href={`/loans/${activeLoan.id}/pay`} className="btn-primary flex-shrink-0">
+                Pay now
+              </Link>
+            </div>
+          )}
+
+          <div className="grid sm:grid-cols-5 gap-5 mb-8">
+            <div className="ledger-card sm:col-span-2 p-6 flex items-center gap-5">
+              <div className="ring-wrap">
+                <svg width="108" height="108" viewBox="0 0 108 108">
+                  <circle className="ring-track" cx="54" cy="54" r={RADIUS} />
+                  <circle
+                    className="ring-fill"
+                    cx="54" cy="54" r={RADIUS}
+                    stroke={ringColor}
+                    strokeDasharray={CIRC}
+                    strokeDashoffset={ringOffset}
+                  />
+                </svg>
+                <div className="ring-center">
+                  <span className="font-display text-2xl" style={{ color: 'var(--ink)', fontWeight: 500 }}>{utilizationPct}%</span>
+                  <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: 'var(--ink-4)' }}>used</span>
+                </div>
+              </div>
+              <div>
+                <p className="text-xs font-mono uppercase tracking-widest mb-1" style={{ color: 'var(--ink-4)' }}>
+                  Available credit
+                </p>
+                <p className="font-display text-2xl mb-2" style={{ color: 'var(--ink)', fontWeight: 500 }}>
+                  {peso(availableCredit)}
+                </p>
+                <p className="text-xs font-mono" style={{ color: 'var(--ink-3)' }}>
+                  of {peso(creditLimitValue)} limit
+                </p>
+                {outstandingPrincipal > 0 && (
+                  <p className="text-xs font-mono mt-1" style={{ color: 'var(--ink-4)' }}>
+                    {peso(outstandingPrincipal)} outstanding
+                  </p>
+                )}
+              </div>
             </div>
 
-            <div className="card p-6">
-              <p className="text-xs font-mono uppercase tracking-widest mb-2" style={{ color: 'var(--ink-4)' }}>
-                Active loan
-              </p>
-              <p className="font-serif text-3xl" style={{ color: 'var(--ink)' }}>
-                {activeLoan ? peso(activeLoan.total_repayable) : '—'}
-              </p>
-              {activeLoan && (
-                <span
-                  className="text-xs font-mono mt-1 inline-block capitalize px-2 py-0.5 rounded"
-                  style={{ 
-                    background: activeLoan.status === 'overdue' ? 'var(--red-bg)' : 'var(--blue-bg)',
-                    color: activeLoan.status === 'overdue' ? 'var(--red)' : 'var(--blue-mid)' 
-                  }}
-                >
-                  {activeLoan.status === 'approved' ? 'Approved (Pending Disbursement)' : activeLoan.status}
-                </span>
-              )}
-            </div>
+            <div className="ledger-card sm:col-span-3 overflow-hidden">
+              <div className="punch-line" />
+              <div className="p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <p className="text-xs font-mono uppercase tracking-widest" style={{ color: 'var(--ink-4)' }}>
+                    {activeLoan ? 'Active loan' : 'Loan status'}
+                  </p>
+                  {activeLoan && (
+                    <span
+                      className="stamp"
+                      style={{
+                        color: activeLoan.status === 'overdue' ? 'var(--magenta)' : 'var(--teal-dark)',
+                        borderColor: activeLoan.status === 'overdue' ? 'var(--magenta)' : 'var(--teal)',
+                      }}
+                    >
+                      {activeLoan.status === 'approved' ? 'Pending release' : activeLoan.status}
+                    </span>
+                  )}
+                </div>
 
-            <div className="card p-6">
-              <p className="text-xs font-mono uppercase tracking-widest mb-2" style={{ color: 'var(--ink-4)' }}>
-                Next payment due
-              </p>
-              <p className="font-serif text-3xl" style={{ color: 'var(--ink)' }}>
-                {nextInstallment ? peso(nextInstallment.amount_due) : '—'}
-              </p>
-              {nextInstallment && (
-                <span className="text-xs font-mono mt-1 inline-block" style={{ color: 'var(--ink-3)' }}>
-                  due {formatDate(nextInstallment.due_date)}
-                </span>
-              )}
+                {activeLoan ? (
+                  <>
+                    <p className="font-display text-3xl mb-4" style={{ color: 'var(--ink)', fontWeight: 500 }}>
+                      {peso(activeLoan.total_repayable)}
+                    </p>
+
+                    <div className="journey-track mb-4">
+                      {JOURNEY_STEPS.map((step, i) => (
+                        <div key={step} className="journey-step">
+                          {i > 0 && <div className={`journey-line ${i <= journeyIndex ? 'done' : ''}`} />}
+                          <div className={`journey-dot ${i < journeyIndex ? 'done' : i === journeyIndex ? 'current' : ''}`}>
+                            {i < journeyIndex ? '✓' : i + 1}
+                          </div>
+                          <span className={`journey-label ${i === journeyIndex ? 'active' : ''}`}>
+                            {step}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex items-center justify-between text-xs font-mono mb-1.5" style={{ color: 'var(--ink-3)' }}>
+                      <span>{peso(paidSoFar)} paid</span>
+                      <span>{repaymentPct}%</span>
+                    </div>
+                    <div className="progress-track">
+                      <div className="progress-fill" style={{ width: `${repaymentPct}%` }} />
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-sm" style={{ color: 'var(--ink-3)' }}>
+                    {pendingLoan ? 'Your application is under review.' : 'No active loan right now.'}
+                  </p>
+                )}
+              </div>
             </div>
           </div>
 
-          {/* Actions */}
+          {nextInstallment && !isUrgent && (
+            <div className="ledger-card p-6 mb-8 flex items-center justify-between flex-wrap gap-3">
+              <div>
+                <p className="text-xs font-mono uppercase tracking-widest mb-1" style={{ color: 'var(--ink-4)' }}>
+                  Next payment due
+                </p>
+                <p className="font-display text-2xl" style={{ color: 'var(--ink)', fontWeight: 500 }}>
+                  {peso(Number(nextInstallment.amount_due) - Number(nextInstallment.amount_paid))}
+                </p>
+              </div>
+              <span
+                className="countdown-pill"
+                style={{ background: 'var(--teal-bg)', color: 'var(--teal-dark)', borderColor: 'var(--teal-bdr)' }}
+              >
+                due {formatDate(nextInstallment.due_date)}
+                {dueDays !== null && ` · ${dueDays}d`}
+              </span>
+            </div>
+          )}
+
           <div className="flex flex-wrap gap-3 mb-10">
-            {kycStatus === 'verified' && !activeLoan && !pendingLoan && (
+            {kycStatus === 'verified' && availableCredit >= 1000 && (
               <Link href="/loans/apply" className="btn-primary">
-                Apply for a loan
+                {activeLoan ? 'Apply for another loan' : 'Apply for a loan'}
               </Link>
             )}
             {pendingLoan && (
-              <span
-                className="text-sm font-mono px-4 py-2.5 rounded-lg"
-                style={{ background: 'var(--blue-bg)', color: 'var(--blue-mid)', border: '1px solid var(--blue-bdr)' }}
-              >
-                Your application is under review
+              <span className="stamp" style={{ color: 'var(--teal-dark)', borderColor: 'var(--teal)' }}>
+                Under review
               </span>
             )}
             {activeLoan && (
@@ -336,16 +498,16 @@ export default async function DashboardPage() {
             </Link>
           </div>
 
-          {/* Recent payments */}
-          <div className="card overflow-hidden">
+          <div className="ledger-card overflow-hidden mb-8">
+            <div className="punch-line" />
             <div
               className="px-6 py-4 flex items-center justify-between"
-              style={{ borderBottom: '1px solid var(--line)' }}
+              style={{ borderBottom: '1.5px solid var(--line)' }}
             >
-              <h2 className="font-semibold text-sm" style={{ color: 'var(--ink)' }}>
+              <h2 className="font-display text-lg" style={{ color: 'var(--ink)', fontWeight: 500 }}>
                 Recent payments
               </h2>
-              <Link href="/loans" className="text-xs font-medium" style={{ color: 'var(--blue-mid)' }}>
+              <Link href="/loans" className="text-xs font-mono font-bold uppercase tracking-wider" style={{ color: 'var(--teal)' }}>
                 See all
               </Link>
             </div>
@@ -356,7 +518,7 @@ export default async function DashboardPage() {
                   <li
                     key={p.id}
                     className="flex items-center justify-between px-6 py-4 font-mono text-sm"
-                    style={{ borderBottom: '1px solid var(--line)' }}
+                    style={{ borderBottom: '1px dashed var(--line)' }}
                   >
                     <div>
                       <p style={{ color: 'var(--ink)' }}>{peso(p.amount)}</p>
@@ -364,10 +526,7 @@ export default async function DashboardPage() {
                         {formatDate(p.paid_at)} · {p.channel ?? 'unspecified'}
                       </p>
                     </div>
-                    <span
-                      className="text-xs px-2.5 py-1 rounded-full capitalize"
-                      style={{ background: 'var(--green-bg)', color: 'var(--green)', border: '1px solid var(--green-bdr)' }}
-                    >
+                    <span className="stamp" style={{ color: 'var(--teal-dark)', borderColor: 'var(--teal)' }}>
                       Paid
                     </span>
                   </li>
@@ -380,6 +539,13 @@ export default async function DashboardPage() {
                 </p>
               </div>
             )}
+          </div>
+
+          <div className="seal-strip">
+            <div className="seal-item">🔒 256-bit encrypted</div>
+            <div className="seal-item">🛡️ BSP-aligned lending practices</div>
+            <div className="seal-item">📄 Data Privacy Act compliant</div>
+            <div className="seal-item">✓ Verified borrower network</div>
           </div>
         </main>
       </div>
