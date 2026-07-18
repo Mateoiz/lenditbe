@@ -6,64 +6,95 @@ import { createClient } from '@/lib/supabase/server'
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
 const ALLOWED_MIME  = ['image/jpeg', 'image/png', 'image/heic', 'image/webp']
 
-function validateUpload(file: File, label: string) {
-  if (file.size > MAX_FILE_SIZE)
-    throw new Error(`${label} must be under 10MB`)
-  if (!ALLOWED_MIME.includes(file.type))
-    throw new Error(`${label} must be a JPG, PNG, HEIC, or WebP image`)
+function validateUpload(file: File, label: string): string | null {
+  if (file.size > MAX_FILE_SIZE) return `${label} must be under 10MB`
+  if (!ALLOWED_MIME.includes(file.type)) return `${label} must be a JPG, PNG, HEIC, or WebP image`
+  return null
 }
 
-export async function submitVerification(formData: FormData) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Not authenticated')
+export async function submitVerification(
+  formData: FormData
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { ok: false, error: 'Not authenticated' }
 
-  const idType   = formData.get('id_type') as string
-  const idNumber = formData.get('id_number') as string
-  const idFront  = formData.get('id_front') as File | null
-  const selfie   = formData.get('selfie') as File | null
+    const idType   = formData.get('id_type') as string
+    const idNumber = formData.get('id_number') as string
+    const idFront  = formData.get('id_front') as File | null
+    const idBack   = formData.get('id_back') as File | null
+    const selfie   = formData.get('selfie') as File | null
 
-  if (!idType || !idNumber) throw new Error('ID type and number are required')
-  if (!idFront || !selfie)  throw new Error('Both photos are required')
+    if (!idType || !idNumber) return { ok: false, error: 'ID type and number are required' }
+    if (!idFront || !selfie)  return { ok: false, error: 'Both photos are required' }
 
-  // Validate file size and MIME types before sending over the network
-  validateUpload(idFront, 'ID photo')
-  validateUpload(selfie,  'Selfie')
+    const frontIssue = validateUpload(idFront, 'ID photo')
+    if (frontIssue) return { ok: false, error: frontIssue }
 
-  // Upload ID front
-  const frontExt  = idFront.name.split('.').pop()
-  const frontPath = `kyc/${user.id}/id_front_${Date.now()}.${frontExt}`
-  const { error: frontErr } = await supabase.storage
-    .from('kyc-documents')
-    .upload(frontPath, idFront, { upsert: true })
-  if (frontErr) throw new Error('Failed to upload ID photo: ' + frontErr.message)
+    const selfieIssue = validateUpload(selfie, 'Selfie')
+    if (selfieIssue) return { ok: false, error: selfieIssue }
 
-  // Upload selfie
-  const selfieExt  = selfie.name.split('.').pop()
-  const selfiePath = `kyc/${user.id}/selfie_${Date.now()}.${selfieExt}`
-  const { error: selfieErr } = await supabase.storage
-    .from('kyc-documents')
-    .upload(selfiePath, selfie, { upsert: true })
-  if (selfieErr) throw new Error('Failed to upload selfie: ' + selfieErr.message)
+    if (idBack) {
+      const backIssue = validateUpload(idBack, 'ID back photo')
+      if (backIssue) return { ok: false, error: backIssue }
+    }
 
-  // Get public URLs
-  const { data: frontUrl  } = supabase.storage.from('kyc-documents').getPublicUrl(frontPath)
-  const { data: selfieUrl } = supabase.storage.from('kyc-documents').getPublicUrl(selfiePath)
+    // Upload ID front
+    const frontExt  = idFront.name.split('.').pop()
+    const frontPath = `kyc/${user.id}/id_front_${Date.now()}.${frontExt}`
+    const { error: frontErr } = await supabase.storage
+      .from('kyc-documents')
+      .upload(frontPath, idFront, { upsert: true })
+    if (frontErr) return { ok: false, error: 'Failed to upload ID photo: ' + frontErr.message }
 
-  // Update borrower record
-  const { error: updateErr } = await supabase
-    .from('borrowers')
-    .update({
-      id_type:               idType,
-      id_number:             idNumber,
-      id_front_image_url:    frontUrl.publicUrl,
-      id_selfie_url:         selfieUrl.publicUrl,
-      data_privacy_consent:  true,
-      credit_check_consent:  true,
-      consent_given_at:      new Date().toISOString(),
-      kyc_status:            'pending', // Admin reviews and flips to 'verified'
-    })
-    .eq('id', user.id)
+    // Upload ID back (optional, depends on document type)
+    let backPath: string | null = null
+    if (idBack) {
+      const backExt = idBack.name.split('.').pop()
+      backPath = `kyc/${user.id}/id_back_${Date.now()}.${backExt}`
+      const { error: backErr } = await supabase.storage
+        .from('kyc-documents')
+        .upload(backPath, idBack, { upsert: true })
+      if (backErr) return { ok: false, error: 'Failed to upload ID back photo: ' + backErr.message }
+    }
 
-  if (updateErr) throw new Error('Failed to save verification: ' + updateErr.message)
+    // Upload selfie
+    const selfieExt  = selfie.name.split('.').pop()
+    const selfiePath = `kyc/${user.id}/selfie_${Date.now()}.${selfieExt}`
+    const { error: selfieErr } = await supabase.storage
+      .from('kyc-documents')
+      .upload(selfiePath, selfie, { upsert: true })
+    if (selfieErr) return { ok: false, error: 'Failed to upload selfie: ' + selfieErr.message }
+
+    // Get public URLs
+    const { data: frontUrl }  = supabase.storage.from('kyc-documents').getPublicUrl(frontPath)
+    const { data: backUrl }   = backPath
+      ? supabase.storage.from('kyc-documents').getPublicUrl(backPath)
+      : { data: null }
+    const { data: selfieUrl } = supabase.storage.from('kyc-documents').getPublicUrl(selfiePath)
+
+    // Update borrower record
+    const { error: updateErr } = await supabase
+      .from('borrowers')
+      .update({
+        id_type:              idType,
+        id_number:            idNumber,
+        id_front_image_url:   frontUrl.publicUrl,
+        id_back_image_url:    backUrl?.publicUrl ?? null,
+        id_selfie_url:        selfieUrl.publicUrl,
+        data_privacy_consent: true,
+        credit_check_consent: true,
+        consent_given_at:     new Date().toISOString(),
+        kyc_status:           'pending', // Admin reviews and flips to 'verified'
+      })
+      .eq('id', user.id)
+
+    if (updateErr) return { ok: false, error: 'Failed to save verification: ' + updateErr.message }
+
+    return { ok: true }
+  } catch (err: any) {
+    // Catch-all so an unexpected exception never falls through as an opaque digest
+    return { ok: false, error: err?.message ?? 'Unexpected error during verification.' }
+  }
 }

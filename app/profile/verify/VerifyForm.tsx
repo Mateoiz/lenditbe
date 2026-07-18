@@ -9,10 +9,19 @@ interface IdMeta {
   label: string
   hint: string
   mask: string
+  pattern: RegExp
   requiresBack: boolean
 }
 
-const ID_TYPES: IdMeta[] = [
+// mask uses # = digit, A = letter. pattern derived from mask for real validation.
+function maskToPattern(mask: string): RegExp {
+  const escaped = mask.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')
+  const withDigits = escaped.replace(/#/g, '\\d')
+  const withLetters = withDigits.replace(/A/g, '[A-Za-z]')
+  return new RegExp(`^${withLetters}$`)
+}
+
+const RAW_ID_TYPES: Omit<IdMeta, 'pattern'>[] = [
   { value: 'philsys',         label: 'PhilSys (National ID)', hint: '1234-5678-9012-3456', mask: '####-####-####-####', requiresBack: true },
   { value: 'passport',        label: 'Philippine Passport',   hint: 'P1234567A',             mask: 'A########',         requiresBack: false },
   { value: 'drivers_license', label: "Driver's License",      hint: 'A01-23-456789',         mask: 'A##-##-######',     requiresBack: true },
@@ -22,6 +31,8 @@ const ID_TYPES: IdMeta[] = [
   { value: 'postal_id',       label: 'Postal ID',             hint: 'PRN-000000000000',      mask: 'AAA-############',  requiresBack: true },
   { value: 'voters_id',       label: "Voter's ID",            hint: '0000-0000A-00000AAA',   mask: '####-#####-########', requiresBack: true },
 ]
+
+const ID_TYPES: IdMeta[] = RAW_ID_TYPES.map(t => ({ ...t, pattern: maskToPattern(t.mask) }))
 
 type CameraTarget = 'idFront' | 'idBack' | 'face' | null
 
@@ -45,8 +56,10 @@ export default function VerifyForm({ currentStatus }: { currentStatus: string })
 
   const [activeTarget, setActiveTarget] = useState<CameraTarget>(null)
   const [cameraError, setCameraError] = useState('')
+  const [cameraUnsupported, setCameraUnsupported] = useState(false)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const cameraRequestId = useRef(0) // guards against late-resolving getUserMedia after cancel
 
   const [privacyConsent, setPrivacyConsent] = useState(false)
   const [creditConsent, setCreditConsent]   = useState(false)
@@ -88,8 +101,8 @@ export default function VerifyForm({ currentStatus }: { currentStatus: string })
     if (!idType) newErrors.idType = 'Please select a government ID type.'
     if (!idNumber.trim()) {
       newErrors.idNumber = 'ID number is required.'
-    } else if (idNumber.trim().length < 5) {
-      newErrors.idNumber = 'Please enter a valid, complete ID number.'
+    } else if (selectedMeta && !selectedMeta.pattern.test(idNumber.trim())) {
+      newErrors.idNumber = `Doesn't match the expected format (${selectedMeta.hint}).`
     }
     setErrors(newErrors)
     return Object.keys(newErrors).length === 0
@@ -107,8 +120,17 @@ export default function VerifyForm({ currentStatus }: { currentStatus: string })
   async function startCamera(target: CameraTarget) {
     stopCamera()
     setCameraError('')
+    setCameraUnsupported(false)
     setActiveTarget(target)
     setErrors(prev => ({ ...prev, [target || '']: '' }))
+
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      setCameraUnsupported(true)
+      setCameraError('Camera access is not supported on this browser or connection. Try a different browser, or make sure you\'re on HTTPS.')
+      return
+    }
+
+    const requestId = ++cameraRequestId.current
 
     try {
       const facingMode = target === 'face' ? 'user' : { ideal: 'environment' }
@@ -116,15 +138,25 @@ export default function VerifyForm({ currentStatus }: { currentStatus: string })
         video: { facingMode, width: { ideal: 1920 }, height: { ideal: 1080 } },
         audio: false,
       })
+
+      // If the user cancelled while the permission prompt was pending,
+      // don't attach the late-arriving stream — just stop it immediately.
+      if (requestId !== cameraRequestId.current) {
+        stream.getTracks().forEach(track => track.stop())
+        return
+      }
+
       if (videoRef.current) {
         videoRef.current.srcObject = stream
       }
     } catch (err: any) {
+      if (requestId !== cameraRequestId.current) return
       setCameraError('Unable to access camera hardware. Please grant browser camera permissions to proceed.')
     }
   }
 
   function stopCamera() {
+    cameraRequestId.current++ // invalidate any in-flight request
     if (videoRef.current && videoRef.current.srcObject) {
       const stream = videoRef.current.srcObject as MediaStream
       stream.getTracks().forEach(track => track.stop())
@@ -192,7 +224,12 @@ export default function VerifyForm({ currentStatus }: { currentStatus: string })
     formData.set('credit_check_consent', 'true')
 
     try {
-      await submitVerification(formData)
+      const result = await submitVerification(formData)
+      if (!result.ok) {
+        setGlobalError(result.error)
+        setLoading(false)
+        return
+      }
       router.push('/dashboard?kyc=submitted')
     } catch (err: any) {
       setGlobalError(err.message ?? 'An unexpected network error occurred. Please try again.')
@@ -203,53 +240,55 @@ export default function VerifyForm({ currentStatus }: { currentStatus: string })
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=Space+Mono:wght@400;700&family=Inter:wght@400;500;600;700&display=swap');
 
         :root {
-          --bg: #F8FAFC;
-          --bg-card: #FFFFFF;
-          --ink: #0F172A;
-          --ink-2: #334155;
-          --ink-3: #64748B;
-          --ink-4: #94A3B8;
-          --blue: #4F46E5;
-          --blue-mid: #6366F1;
-          --blue-bg: #EEF2FF;
-          --blue-bdr: #C7D2FE;
-          --line: #E2E8F0;
-          --green: #059669;
-          --green-bg: #ECFDF5;
-          --red: #E11D48;
-          --red-bg: #FFF1F2;
-          --red-bdr: #FECDD3;
+          --paper:     #FFFDF7;
+          --paper-2:   #F5F0E4;
+          --card:      #FFFFFF;
+
+          --ink:       #14110F;
+          --ink-2:     #3A362F;
+          --ink-3:     #6B655A;
+          --ink-4:     #9C9484;
+
+          --teal:      #0B5D52;
+          --teal-dark: #073F38;
+          --teal-bg:   #E5F1EE;
+          --teal-bdr:  #B9D9D2;
+
+          --marigold:      #F5A623;
+          --marigold-dark: #B87814;
+          --marigold-bg:   #FDF0DA;
+          --marigold-bdr:  #F0CE93;
+
+          --magenta:     #C81E5C;
+          --magenta-bg:  #FBE7EF;
+          --magenta-bdr: #EFB4CB;
+
+          --line:      rgba(20, 17, 15, 0.10);
+          --line-md:   rgba(20, 17, 15, 0.18);
         }
 
-        body {
-          font-family: 'Plus Jakarta Sans', -apple-system, sans-serif;
-          background-color: var(--bg); color: var(--ink);
-          -webkit-tap-highlight-color: transparent;
-        }
+        body { font-family:'Inter',-apple-system,sans-serif; background-color:var(--paper); color:var(--ink); -webkit-tap-highlight-color:transparent; }
+        .font-display { font-family:'Fraunces',Georgia,serif; }
+        .font-mono  { font-family:'Space Mono',monospace; }
 
-        .font-serif { font-family: 'DM Serif Display', Georgia, serif; }
-        .font-mono  { font-family: 'JetBrains Mono', monospace; }
-
-        /* FIX 1: background-attachment:local stops the dot grid from repainting on scroll */
         .blueprint-canvas {
           min-height: 100vh;
-          background-color: #F8FAFC;
-          background-image: radial-gradient(rgba(99, 102, 241, 0.12) 1px, transparent 0);
-          background-size: 24px 24px;
+          background-color: var(--paper);
+          background-image: radial-gradient(rgba(20,17,15,0.06) 1px, transparent 0);
+          background-size: 22px 22px;
           background-attachment: local;
           display: flex; flex-direction: column;
         }
 
-        /* FIX 2: valid padding with media query instead of invalid sm:padding-44px */
         .verification-card {
-          background: var(--bg-card);
-          border: 1px solid rgba(15, 23, 42, 0.08);
-          border-radius: 20px;
-          box-shadow: 0 20px 40px -15px rgba(15, 23, 42, 0.05), 0 0 1px 1px rgba(15, 23, 42, 0.02);
+          background: var(--card);
+          border: 1.5px solid var(--line-md);
+          border-radius: 6px;
           padding: 20px;
+          position: relative;
         }
         @media (min-width: 640px) {
           .verification-card { padding: 44px; }
@@ -257,82 +296,77 @@ export default function VerifyForm({ currentStatus }: { currentStatus: string })
 
         .field-label {
           display: block; font-size: 11px; font-weight: 700;
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Space Mono', monospace;
           text-transform: uppercase; letter-spacing: 0.06em;
-          color: var(--ink-3); margin-bottom: 8px;
+          color: var(--ink-4); margin-bottom: 8px;
         }
 
-        /* FIX 3: 16px prevents iOS Safari auto-zoom on input focus */
         .field-input {
-          width: 100%; padding: 14px 16px; border-radius: 12px;
-          border: 1px solid var(--line); background: #F8FAFC;
+          width: 100%; padding: 14px 16px; border-radius: 4px;
+          border: 1.5px solid var(--line-md); background: var(--paper-2);
           color: var(--ink); font-size: 16px; font-weight: 500;
           transition: all 0.2s ease; outline: none; box-sizing: border-box;
+          font-family: 'Inter', sans-serif;
         }
         .field-input:focus {
-          border-color: var(--blue-mid); background: #FFFFFF;
-          box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+          border-color: var(--teal); background: var(--card);
+          box-shadow: 0 0 0 3px var(--teal-bg);
         }
-        .field-input.error { border-color: var(--red); background: var(--red-bg); }
+        .field-input.error { border-color: var(--magenta); background: var(--magenta-bg); }
 
         .blueprint-id-badge {
-          background: #0F172A; border: 1px solid rgba(255, 255, 255, 0.1);
-          border-radius: 12px; padding: 20px; color: #FFFFFF;
+          background: var(--ink); border: 1.5px solid var(--ink);
+          border-radius: 6px; padding: 20px; color: #FFFDF7;
           position: relative; overflow: hidden;
         }
         .blueprint-id-badge::after {
           content: ''; position: absolute; inset: 0;
-          background-image: linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
-                            linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+          background-image: linear-gradient(rgba(255,253,247,0.04) 1px, transparent 1px),
+                            linear-gradient(90deg, rgba(255,253,247,0.04) 1px, transparent 1px);
           background-size: 12px 12px; pointer-events: none;
         }
 
         .scan-box {
-          border: 1px solid var(--line); border-radius: 16px;
-          background: #F8FAFC; overflow: hidden; transition: all 0.2s ease;
+          border: 1.5px solid var(--line-md); border-radius: 6px;
+          background: var(--paper-2); overflow: hidden; transition: all 0.2s ease;
         }
-        .scan-box.error { border-color: var(--red); background: var(--red-bg); }
+        .scan-box.error { border-color: var(--magenta); background: var(--magenta-bg); }
 
         .reticle-card {
           width: 85%; max-width: 380px; aspect-ratio: 1.58 / 1;
-          border: 2px dashed rgba(255, 255, 255, 0.7);
-          border-radius: 12px; pointer-events: none;
+          border: 2px dashed rgba(255, 253, 247, 0.75);
+          border-radius: 8px; pointer-events: none;
           box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.65);
         }
         .reticle-face {
           width: 70%; max-width: 280px; aspect-ratio: 3 / 4;
-          border: 2px dashed rgba(99, 102, 241, 0.8);
+          border: 2px dashed rgba(245, 166, 35, 0.85);
           border-radius: 50%; pointer-events: none;
           box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.65);
         }
 
-        /* FIX 4: touch-action:manipulation removes 300ms tap delay on mobile */
         .btn-primary {
           display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-          padding: 15px 28px; border-radius: 12px; min-height: 48px;
-          background: var(--blue-mid); color: #fff;
-          font-size: 15px; font-weight: 600; border: none; cursor: pointer;
-          box-shadow: 0 4px 12px rgba(99, 102, 241, 0.25);
-          transition: all 0.2s ease;
-          touch-action: manipulation;
-          font-family: 'Plus Jakarta Sans', sans-serif;
+          padding: 12px 24px; border-radius: 4px; min-height: 48px;
+          background: var(--marigold); color: var(--teal-dark);
+          font-size: 14px; font-weight: 700; border: 1.5px solid var(--ink); cursor: pointer;
+          box-shadow: 3px 3px 0 var(--ink);
+          transition: all 0.15s ease; touch-action: manipulation;
+          font-family: 'Inter', sans-serif;
         }
-        .btn-primary:hover:not(:disabled) {
-          background: var(--blue); transform: translateY(-1px);
-          box-shadow: 0 6px 16px rgba(99, 102, 241, 0.35);
-        }
-        .btn-primary:active:not(:disabled) { transform: scale(0.98); }
+        .btn-primary:hover:not(:disabled) { transform: translate(-1px,-1px); box-shadow: 4px 4px 0 var(--ink); }
+        .btn-primary:active:not(:disabled) { transform: translate(1px,1px); box-shadow: 1px 1px 0 var(--ink); }
         .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; transform: none; }
+        .btn-primary.dark { background: var(--ink); color: var(--paper); border-color: var(--ink); }
 
         .btn-ghost {
           display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-          padding: 14px 22px; border-radius: 12px; min-height: 48px; background: transparent;
-          color: var(--ink-3); font-size: 15px; font-weight: 600;
-          border: 1px solid var(--line); cursor: pointer; transition: all 0.15s ease;
-          touch-action: manipulation;
-          font-family: 'Plus Jakarta Sans', sans-serif;
+          padding: 12px 22px; border-radius: 4px; min-height: 48px; background: var(--card);
+          color: var(--ink-2); font-size: 14px; font-weight: 600;
+          border: 1.5px solid var(--line-md); cursor: pointer; transition: all 0.15s ease;
+          touch-action: manipulation; font-family: 'Inter', sans-serif;
         }
-        .btn-ghost:hover { background: #F1F5F9; color: var(--ink); }
+        .btn-ghost:hover { border-color: var(--teal); color: var(--teal); background: var(--teal-bg); }
         .btn-ghost:active { transform: scale(0.98); }
 
         .step-tab {
@@ -340,14 +374,11 @@ export default function VerifyForm({ currentStatus }: { currentStatus: string })
           padding-bottom: 12px; border-bottom: 2px solid transparent;
           transition: all 0.2s ease;
         }
-        .step-tab.active { border-color: var(--blue-mid); color: var(--blue-mid); }
-        .step-tab.done   { border-color: var(--green); color: var(--green); }
-        .step-tab.idle   { border-color: var(--line); color: var(--ink-4); }
+        .step-tab.active { border-color: var(--marigold); color: var(--marigold-dark); }
+        .step-tab.done   { border-color: var(--teal); color: var(--teal-dark); }
+        .step-tab.idle   { border-color: var(--line-md); color: var(--ink-4); }
 
-        /* FIX 5: safe-area insets for notched iPhones */
-        .sticky-header {
-          padding-top: env(safe-area-inset-top);
-        }
+        .sticky-header { padding-top: env(safe-area-inset-top); }
         .camera-topbar {
           padding-top: max(16px, env(safe-area-inset-top));
           padding-left: max(16px, env(safe-area-inset-left));
@@ -360,29 +391,38 @@ export default function VerifyForm({ currentStatus }: { currentStatus: string })
           padding-right: max(24px, env(safe-area-inset-right));
           padding-top: 24px;
         }
+
+        .stamp {
+          display: inline-flex; align-items: center; gap: 5px;
+          font-family: 'Space Mono', monospace; font-size: 11px; font-weight: 700;
+          text-transform: uppercase; letter-spacing: 0.06em;
+          padding: 4px 10px; border-radius: 3px;
+          border: 2px solid; transform: rotate(-3deg); mix-blend-mode: multiply;
+        }
       `}</style>
 
       {/* ── FULLSCREEN MOBILE CAMERA MODAL ── */}
       {activeTarget && (
-        <div className="fixed inset-0 z-[100] bg-slate-950 flex flex-col justify-between">
-          {/* FIX 5a: camera-topbar handles notch/status bar */}
-          <div className="camera-topbar flex items-center justify-between bg-slate-900/90 backdrop-blur text-white z-10 border-b border-white/10">
-            <span className="text-xs font-mono font-bold tracking-wider text-indigo-400 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+        <div className="fixed inset-0 z-[100] flex flex-col justify-between" style={{ background: '#0F0D0B' }}>
+          <div
+            className="camera-topbar flex items-center justify-between backdrop-blur z-10"
+            style={{ background: 'rgba(15,13,11,0.92)', color: '#FFFDF7', borderBottom: '1px solid rgba(255,253,247,0.12)' }}
+          >
+            <span className="text-xs font-mono font-bold tracking-wider flex items-center gap-2" style={{ color: 'var(--marigold)' }}>
+              <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: 'var(--magenta)' }} />
               {activeTarget === 'idFront' ? 'SCAN FRONT OF ID' : activeTarget === 'idBack' ? 'SCAN BACK OF ID' : 'BIOMETRIC SELFIE'}
             </span>
             <button
               type="button"
               onClick={() => setActiveTarget(null)}
-              className="px-3.5 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-xs text-white font-mono font-semibold transition active:scale-95"
-              style={{ touchAction: 'manipulation' }}
+              className="px-3.5 py-2 rounded-lg text-xs font-mono font-semibold transition active:scale-95"
+              style={{ background: 'rgba(255,253,247,0.1)', color: '#FFFDF7', touchAction: 'manipulation' }}
             >
               ✕ CANCEL
             </button>
           </div>
 
-          {/* Viewfinder */}
-          <div className="relative flex-1 flex items-center justify-center overflow-hidden bg-black">
+          <div className="relative flex-1 flex items-center justify-center overflow-hidden" style={{ background: '#000' }}>
             <video
               ref={videoRef}
               autoPlay
@@ -393,34 +433,48 @@ export default function VerifyForm({ currentStatus }: { currentStatus: string })
             />
             <canvas ref={canvasRef} className="hidden" />
 
-            {activeTarget === 'face' ? (
-              <div className="reticle-face" />
-            ) : (
-              <div className="reticle-card" />
-            )}
+            {activeTarget === 'face' ? <div className="reticle-face" /> : <div className="reticle-card" />}
 
             {cameraError && (
-              <div className="absolute inset-x-6 top-6 z-20 bg-rose-600 text-white p-3 rounded-xl text-xs font-medium text-center shadow-lg">
+              <div
+                className="absolute inset-x-6 top-6 z-20 p-3 rounded-xl text-xs font-medium text-center shadow-lg"
+                style={{ background: 'var(--magenta)', color: '#FFFDF7' }}
+              >
                 {cameraError}
+                {cameraUnsupported && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveTarget(null)}
+                    className="block mx-auto mt-2 underline font-mono text-[11px]"
+                  >
+                    Close and go back
+                  </button>
+                )}
               </div>
             )}
           </div>
 
-          {/* FIX 5b: camera-bottombar clears home bar on iPhone */}
-          <div className="camera-bottombar bg-slate-900/95 backdrop-blur flex flex-col items-center gap-4 z-10 border-t border-white/10">
-            <p className="text-xs font-mono text-slate-300 text-center">
+          <div
+            className="camera-bottombar flex flex-col items-center gap-4 z-10"
+            style={{ background: 'rgba(15,13,11,0.95)', borderTop: '1px solid rgba(255,253,247,0.12)' }}
+          >
+            <p className="text-xs font-mono text-center" style={{ color: 'rgba(255,253,247,0.7)' }}>
               {activeTarget === 'face' ? 'Align face within oval in good lighting' : 'Fit ID card edges within the dotted box'}
             </p>
 
-            {/* FIX 6: removed invalid w-18 h-18 sm:w-20 sm:h-20 — use inline style only */}
             <button
               type="button"
               onClick={captureFrame}
-              className="rounded-full bg-white border-4 border-indigo-500 flex items-center justify-center shadow-xl active:scale-90 transition-all cursor-pointer p-1.5"
+              disabled={cameraUnsupported}
+              className="rounded-full flex items-center justify-center shadow-xl active:scale-90 transition-all cursor-pointer p-1.5"
               aria-label="Take Photo"
-              style={{ width: '72px', height: '72px', minWidth: '72px', touchAction: 'manipulation' }}
+              style={{
+                width: '72px', height: '72px', minWidth: '72px', touchAction: 'manipulation',
+                background: '#FFFDF7', border: '4px solid var(--marigold)',
+                opacity: cameraUnsupported ? 0.4 : 1,
+              }}
             >
-              <div className="w-full h-full rounded-full bg-indigo-600 hover:bg-indigo-500 transition-colors" />
+              <div className="w-full h-full rounded-full transition-colors" style={{ background: 'var(--teal)' }} />
             </button>
           </div>
         </div>
@@ -428,21 +482,26 @@ export default function VerifyForm({ currentStatus }: { currentStatus: string })
 
       {/* ── STANDARD FORM CANVAS ── */}
       <div className="blueprint-canvas">
-        {/* FIX 5c: sticky-header adds safe-area-inset-top so content clears the notch */}
-        <header className="sticky-header w-full border-b border-slate-200/80 bg-white/80 backdrop-blur-md px-4 sm:px-10 py-3.5 flex items-center justify-between sticky top-0 z-50">
+        <header
+          className="sticky-header w-full backdrop-blur-md px-4 sm:px-10 py-3.5 flex items-center justify-between sticky top-0 z-50"
+          style={{ borderBottom: '2px solid var(--ink)', background: 'rgba(255,253,247,0.85)' }}
+        >
           <div className="flex items-center gap-2 sm:gap-3">
-            <a href="/dashboard" className="font-serif text-lg sm:text-xl tracking-tight text-slate-900" style={{ textDecoration: 'none' }}>
-              Lendit<span className="text-indigo-600 italic">Be</span>
+            <a href="/dashboard" className="font-display text-lg sm:text-xl tracking-tight" style={{ textDecoration: 'none', color: 'var(--ink)' }}>
+              Lendit<span style={{ color: 'var(--teal)', fontStyle: 'italic' }}>Be</span>
             </a>
-            <span className="text-slate-300 font-light">/</span>
-            <span className="text-[11px] font-mono font-semibold uppercase tracking-wider text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+            <span className="font-light" style={{ color: 'var(--ink-4)' }}>/</span>
+            <span
+              className="text-[11px] font-mono font-semibold uppercase tracking-wider px-2 py-0.5 rounded"
+              style={{ color: 'var(--ink-3)', background: 'var(--paper-2)' }}
+            >
               Live KYC
             </span>
           </div>
           <button
             onClick={() => router.push('/dashboard')}
-            className="text-[11px] font-mono text-slate-400 hover:text-slate-600 transition py-1 px-2"
-            style={{ touchAction: 'manipulation' }}
+            className="text-[11px] font-mono transition py-1 px-2"
+            style={{ color: 'var(--ink-4)', touchAction: 'manipulation' }}
           >
             EXIT
           </button>
@@ -452,16 +511,16 @@ export default function VerifyForm({ currentStatus }: { currentStatus: string })
           <div className="w-full max-w-xl">
 
             <div className="mb-6 sm:mb-8 text-center sm:text-left">
-              <h1 className="font-serif text-2xl sm:text-4xl text-slate-900 tracking-tight">
+              <h1 className="font-display text-2xl sm:text-4xl tracking-tight" style={{ color: 'var(--ink)', fontWeight: 500 }}>
                 Biometric Security
               </h1>
-              <p className="text-xs sm:text-sm text-slate-500 mt-1">
+              <p className="text-xs sm:text-sm mt-1" style={{ color: 'var(--ink-3)' }}>
                 Live hardware captures only. Uploads are disabled to prevent identity fraud.
               </p>
             </div>
 
             {currentStatus === 'rejected' && (
-              <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 mb-6 flex items-start gap-3 text-rose-700">
+              <div className="rounded-xl p-4 mb-6 flex items-start gap-3" style={{ background: 'var(--magenta-bg)', border: '1.5px solid var(--magenta-bdr)', color: 'var(--magenta)' }}>
                 <span className="text-base mt-0.5">⚠️</span>
                 <div className="text-xs sm:text-sm">
                   <strong className="font-semibold block">Previous Verification Rejected</strong>
@@ -471,7 +530,7 @@ export default function VerifyForm({ currentStatus }: { currentStatus: string })
             )}
 
             {globalError && (
-              <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 mb-6 flex items-center gap-3 text-rose-700 text-xs sm:text-sm font-medium">
+              <div className="rounded-xl p-4 mb-6 flex items-center gap-3 text-xs sm:text-sm font-medium" style={{ background: 'var(--magenta-bg)', border: '1.5px solid var(--magenta-bdr)', color: 'var(--magenta)' }}>
                 <span className="text-base">🚨</span>
                 <span>{globalError}</span>
               </div>
@@ -479,8 +538,7 @@ export default function VerifyForm({ currentStatus }: { currentStatus: string })
 
             <div className="verification-card">
 
-              {/* FIX 7: shortened step labels so they don't overflow on 375px screens */}
-              <div className="grid grid-cols-3 gap-1 mb-6 sm:mb-8 border-b border-slate-100 pb-2">
+              <div className="grid grid-cols-3 gap-1 mb-6 sm:mb-8 pb-2" style={{ borderBottom: '1.5px solid var(--line)' }}>
                 {[
                   { num: 1, label: '01 / DOC' },
                   { num: 2, label: '02 / SCANS' },
@@ -507,21 +565,21 @@ export default function VerifyForm({ currentStatus }: { currentStatus: string })
                     <select
                       className={`field-input ${errors.idType ? 'error' : ''}`}
                       value={idType}
-                      onChange={e => { setIdType(e.target.value); setErrors(prev => ({ ...prev, idType: '' })) }}
+                      onChange={e => { setIdType(e.target.value); setErrors(prev => ({ ...prev, idType: '', idNumber: '' })) }}
                     >
                       <option value="">Select identification type...</option>
                       {ID_TYPES.map(t => (
                         <option key={t.value} value={t.value}>{t.label}</option>
                       ))}
                     </select>
-                    {errors.idType && <span className="text-xs text-rose-600 mt-1.5 block font-medium">{errors.idType}</span>}
+                    {errors.idType && <span className="text-xs mt-1.5 block font-medium" style={{ color: 'var(--magenta)' }}>{errors.idType}</span>}
                   </div>
 
                   <div>
                     <div className="flex justify-between items-center mb-1">
                       <label className="field-label !mb-0">Document Number</label>
                       {selectedMeta && (
-                        <span className="text-[11px] font-mono text-indigo-600 font-semibold">
+                        <span className="text-[11px] font-mono font-semibold" style={{ color: 'var(--teal)' }}>
                           Format: {selectedMeta.hint}
                         </span>
                       )}
@@ -533,7 +591,7 @@ export default function VerifyForm({ currentStatus }: { currentStatus: string })
                       value={idNumber}
                       onChange={e => { setIdNumber(e.target.value); setErrors(prev => ({ ...prev, idNumber: '' })) }}
                     />
-                    {errors.idNumber && <span className="text-xs text-rose-600 mt-1.5 block font-medium">{errors.idNumber}</span>}
+                    {errors.idNumber && <span className="text-xs mt-1.5 block font-medium" style={{ color: 'var(--magenta)' }}>{errors.idNumber}</span>}
                   </div>
 
                   <div className="pt-1">
@@ -541,28 +599,31 @@ export default function VerifyForm({ currentStatus }: { currentStatus: string })
                     <div className="blueprint-id-badge">
                       <div className="flex justify-between items-start mb-6 relative z-10">
                         <div>
-                          <span className="text-[10px] font-mono uppercase tracking-widest text-slate-400 block">Republic of the Philippines</span>
-                          <strong className="text-xs sm:text-sm font-semibold text-white mt-0.5 block">
+                          <span className="text-[10px] font-mono uppercase tracking-widest block" style={{ color: 'rgba(255,253,247,0.5)' }}>Republic of the Philippines</span>
+                          <strong className="text-xs sm:text-sm font-semibold mt-0.5 block" style={{ color: '#FFFDF7' }}>
                             {selectedMeta ? selectedMeta.label : 'Select ID Type Above'}
                           </strong>
                         </div>
-                        <span className="text-[9px] sm:text-[10px] font-mono bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded border border-indigo-500/30 font-semibold">
+                        <span
+                          className="text-[9px] sm:text-[10px] font-mono px-2 py-0.5 rounded font-semibold"
+                          style={{ background: 'rgba(245,166,35,0.18)', color: 'var(--marigold)', border: '1px solid rgba(245,166,35,0.35)' }}
+                        >
                           {selectedMeta?.requiresBack ? 'FRONT & BACK' : 'FRONT ONLY'}
                         </span>
                       </div>
-                      <div className="pt-4 border-t border-slate-800 flex justify-between items-end relative z-10">
+                      <div className="pt-4 flex justify-between items-end relative z-10" style={{ borderTop: '1px solid rgba(255,253,247,0.15)' }}>
                         <div>
-                          <span className="text-[9px] font-mono text-slate-500 block uppercase">Document Reference</span>
-                          <span className="text-sm sm:text-base font-mono tracking-widest text-indigo-200 font-semibold">
+                          <span className="text-[9px] font-mono block uppercase" style={{ color: 'rgba(255,253,247,0.45)' }}>Document Reference</span>
+                          <span className="text-sm sm:text-base font-mono tracking-widest font-semibold" style={{ color: 'var(--marigold)' }}>
                             {idNumber.trim() || (selectedMeta ? selectedMeta.mask : '####-####-####-####')}
                           </span>
                         </div>
-                        <div className="text-[10px] font-mono text-slate-500">LIVE SCAN ONLY</div>
+                        <div className="text-[10px] font-mono" style={{ color: 'rgba(255,253,247,0.4)' }}>LIVE SCAN ONLY</div>
                       </div>
                     </div>
                   </div>
 
-                  <div className="flex justify-end pt-3 border-t border-slate-100">
+                  <div className="flex justify-end pt-3" style={{ borderTop: '1.5px solid var(--line)' }}>
                     <button
                       className="btn-primary w-full sm:w-auto"
                       onClick={() => { if (validateStep1()) setStep(2) }}
@@ -577,110 +638,92 @@ export default function VerifyForm({ currentStatus }: { currentStatus: string })
               {step === 2 && (
                 <div className="flex flex-col gap-5 sm:gap-6">
 
-                  {/* ID FRONT */}
                   <div className={`scan-box p-4 ${errors.idFront ? 'error' : ''}`}>
                     <div className="flex justify-between items-center mb-2.5">
-                      <span className="text-xs font-mono font-bold text-slate-700">1. ID FRONT DOCUMENT</span>
-                      {idFrontPreview && <span className="text-xs font-mono text-emerald-600 font-semibold">✓ CAPTURED</span>}
+                      <span className="text-xs font-mono font-bold" style={{ color: 'var(--ink-2)' }}>1. ID FRONT DOCUMENT</span>
+                      {idFrontPreview && <span className="text-xs font-mono font-semibold" style={{ color: 'var(--teal)' }}>✓ CAPTURED</span>}
                     </div>
                     {idFrontPreview ? (
                       <div className="relative">
-                        <img src={idFrontPreview} alt="ID Front" className="w-full h-44 object-cover rounded-xl border border-slate-200" />
+                        <img src={idFrontPreview} alt="ID Front" className="w-full h-44 object-cover rounded-xl" style={{ border: '1.5px solid var(--line-md)' }} />
                         <button
                           type="button"
                           onClick={() => startCamera('idFront')}
-                          className="absolute bottom-3 right-3 bg-slate-900/90 text-white text-xs px-3.5 py-2 rounded-lg font-mono font-medium active:scale-95 transition shadow-md"
-                          style={{ touchAction: 'manipulation' }}
+                          className="absolute bottom-3 right-3 text-xs px-3.5 py-2 rounded-lg font-mono font-medium active:scale-95 transition shadow-md"
+                          style={{ background: 'var(--ink)', color: 'var(--paper)', touchAction: 'manipulation' }}
                         >
                           🔄 Retake Front
                         </button>
                       </div>
                     ) : (
                       <div className="py-8 text-center">
-                        <button
-                          type="button"
-                          onClick={() => startCamera('idFront')}
-                          className="btn-primary w-full sm:w-auto"
-                          style={{ background: '#0F172A' }}
-                        >
+                        <button type="button" onClick={() => startCamera('idFront')} className="btn-primary dark w-full sm:w-auto">
                           📷 Open Camera: Scan Front
                         </button>
                       </div>
                     )}
-                    {errors.idFront && <span className="text-xs text-rose-600 mt-2 block font-medium">{errors.idFront}</span>}
+                    {errors.idFront && <span className="text-xs mt-2 block font-medium" style={{ color: 'var(--magenta)' }}>{errors.idFront}</span>}
                   </div>
 
-                  {/* ID BACK (conditional) */}
                   {selectedMeta?.requiresBack && (
                     <div className={`scan-box p-4 ${errors.idBack ? 'error' : ''}`}>
                       <div className="flex justify-between items-center mb-2.5">
-                        <span className="text-xs font-mono font-bold text-slate-700">2. ID BACK DOCUMENT</span>
-                        {idBackPreview && <span className="text-xs font-mono text-emerald-600 font-semibold">✓ CAPTURED</span>}
+                        <span className="text-xs font-mono font-bold" style={{ color: 'var(--ink-2)' }}>2. ID BACK DOCUMENT</span>
+                        {idBackPreview && <span className="text-xs font-mono font-semibold" style={{ color: 'var(--teal)' }}>✓ CAPTURED</span>}
                       </div>
                       {idBackPreview ? (
                         <div className="relative">
-                          <img src={idBackPreview} alt="ID Back" className="w-full h-44 object-cover rounded-xl border border-slate-200" />
+                          <img src={idBackPreview} alt="ID Back" className="w-full h-44 object-cover rounded-xl" style={{ border: '1.5px solid var(--line-md)' }} />
                           <button
                             type="button"
                             onClick={() => startCamera('idBack')}
-                            className="absolute bottom-3 right-3 bg-slate-900/90 text-white text-xs px-3.5 py-2 rounded-lg font-mono font-medium active:scale-95 transition shadow-md"
-                            style={{ touchAction: 'manipulation' }}
+                            className="absolute bottom-3 right-3 text-xs px-3.5 py-2 rounded-lg font-mono font-medium active:scale-95 transition shadow-md"
+                            style={{ background: 'var(--ink)', color: 'var(--paper)', touchAction: 'manipulation' }}
                           >
                             🔄 Retake Back
                           </button>
                         </div>
                       ) : (
                         <div className="py-8 text-center">
-                          <button
-                            type="button"
-                            onClick={() => startCamera('idBack')}
-                            className="btn-primary w-full sm:w-auto"
-                            style={{ background: '#0F172A' }}
-                          >
+                          <button type="button" onClick={() => startCamera('idBack')} className="btn-primary dark w-full sm:w-auto">
                             📷 Open Camera: Scan Back
                           </button>
                         </div>
                       )}
-                      {errors.idBack && <span className="text-xs text-rose-600 mt-2 block font-medium">{errors.idBack}</span>}
+                      {errors.idBack && <span className="text-xs mt-2 block font-medium" style={{ color: 'var(--magenta)' }}>{errors.idBack}</span>}
                     </div>
                   )}
 
-                  {/* FACE SCAN */}
                   <div className={`scan-box p-4 ${errors.face ? 'error' : ''}`}>
                     <div className="flex justify-between items-center mb-2.5">
-                      <span className="text-xs font-mono font-bold text-slate-700">
+                      <span className="text-xs font-mono font-bold" style={{ color: 'var(--ink-2)' }}>
                         {selectedMeta?.requiresBack ? '3. BIOMETRIC SELFIE' : '2. BIOMETRIC SELFIE'}
                       </span>
-                      {facePreview && <span className="text-xs font-mono text-emerald-600 font-semibold">✓ VERIFIED</span>}
+                      {facePreview && <span className="text-xs font-mono font-semibold" style={{ color: 'var(--teal)' }}>✓ VERIFIED</span>}
                     </div>
                     {facePreview ? (
                       <div className="relative">
-                        <img src={facePreview} alt="Face Scan" className="w-full h-52 object-cover rounded-xl border border-slate-200" />
+                        <img src={facePreview} alt="Face Scan" className="w-full h-52 object-cover rounded-xl" style={{ border: '1.5px solid var(--line-md)' }} />
                         <button
                           type="button"
                           onClick={() => startCamera('face')}
-                          className="absolute bottom-3 right-3 bg-slate-900/90 text-white text-xs px-3.5 py-2 rounded-lg font-mono font-medium active:scale-95 transition shadow-md"
-                          style={{ touchAction: 'manipulation' }}
+                          className="absolute bottom-3 right-3 text-xs px-3.5 py-2 rounded-lg font-mono font-medium active:scale-95 transition shadow-md"
+                          style={{ background: 'var(--ink)', color: 'var(--paper)', touchAction: 'manipulation' }}
                         >
                           🔄 Retake Facial Scan
                         </button>
                       </div>
                     ) : (
                       <div className="py-8 text-center">
-                        <button
-                          type="button"
-                          onClick={() => startCamera('face')}
-                          className="btn-primary w-full sm:w-auto"
-                        >
+                        <button type="button" onClick={() => startCamera('face')} className="btn-primary w-full sm:w-auto">
                           🛡️ Open Camera: Biometric Scan
                         </button>
                       </div>
                     )}
-                    {errors.face && <span className="text-xs text-rose-600 mt-2 block font-medium">{errors.face}</span>}
+                    {errors.face && <span className="text-xs mt-2 block font-medium" style={{ color: 'var(--magenta)' }}>{errors.face}</span>}
                   </div>
 
-                  {/* FIX 8: flex-2 → grow (flex-2 is not a Tailwind class) */}
-                  <div className="flex items-center justify-between pt-3 border-t border-slate-100 gap-3">
+                  <div className="flex items-center justify-between pt-3 gap-3" style={{ borderTop: '1.5px solid var(--line)' }}>
                     <button className="btn-ghost flex-1 sm:flex-none" onClick={() => { setErrors({}); setStep(1) }}>← Back</button>
                     <button className="btn-primary grow sm:flex-none" onClick={() => { if (validateStep2()) setStep(3) }}>
                       Review Disclosures →
@@ -694,42 +737,63 @@ export default function VerifyForm({ currentStatus }: { currentStatus: string })
                 <div className="flex flex-col gap-5 sm:gap-6">
                   <div className="flex flex-col gap-3">
                     <div
-                      className={`p-4 rounded-xl border transition-all cursor-pointer flex items-start gap-3.5 ${privacyConsent ? 'border-indigo-600 bg-indigo-50/40' : 'border-slate-200 bg-slate-50 hover:border-slate-300'}`}
+                      className="p-4 rounded-xl transition-all cursor-pointer flex items-start gap-3.5"
+                      style={{
+                        border: `1.5px solid ${privacyConsent ? 'var(--teal)' : 'var(--line-md)'}`,
+                        background: privacyConsent ? 'var(--teal-bg)' : 'var(--paper-2)',
+                      }}
                       onClick={() => { setPrivacyConsent(v => !v); setGlobalError('') }}
                     >
-                      <div className={`w-5 h-5 rounded flex items-center justify-center flex-shrink-0 mt-0.5 border ${privacyConsent ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-slate-300 bg-white'}`}>
+                      <div
+                        className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0 mt-0.5"
+                        style={{
+                          border: `1.5px solid ${privacyConsent ? 'var(--teal-dark)' : 'var(--line-md)'}`,
+                          background: privacyConsent ? 'var(--teal)' : 'var(--card)',
+                          color: '#fff',
+                        }}
+                      >
                         {privacyConsent && <span className="text-[10px] font-bold">✓</span>}
                       </div>
                       <div>
-                        <strong className="text-xs font-bold text-slate-900 block font-mono uppercase tracking-wide mb-0.5">
+                        <strong className="text-xs font-bold block font-mono uppercase tracking-wide mb-0.5" style={{ color: 'var(--ink)' }}>
                           Data Privacy Act Consent (R.A. 10173)
                         </strong>
-                        <p className="text-xs text-slate-600 leading-relaxed">
+                        <p className="text-xs leading-relaxed" style={{ color: 'var(--ink-3)' }}>
                           I explicitly consent to LenditBe collecting and processing my live government ID scans and facial biometric frame to verify my identity and prevent identity theft.
                         </p>
                       </div>
                     </div>
 
                     <div
-                      className={`p-4 rounded-xl border transition-all cursor-pointer flex items-start gap-3.5 ${creditConsent ? 'border-indigo-600 bg-indigo-50/40' : 'border-slate-200 bg-slate-50 hover:border-slate-300'}`}
+                      className="p-4 rounded-xl transition-all cursor-pointer flex items-start gap-3.5"
+                      style={{
+                        border: `1.5px solid ${creditConsent ? 'var(--teal)' : 'var(--line-md)'}`,
+                        background: creditConsent ? 'var(--teal-bg)' : 'var(--paper-2)',
+                      }}
                       onClick={() => { setCreditConsent(v => !v); setGlobalError('') }}
                     >
-                      <div className={`w-5 h-5 rounded flex items-center justify-center flex-shrink-0 mt-0.5 border ${creditConsent ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-slate-300 bg-white'}`}>
+                      <div
+                        className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0 mt-0.5"
+                        style={{
+                          border: `1.5px solid ${creditConsent ? 'var(--teal-dark)' : 'var(--line-md)'}`,
+                          background: creditConsent ? 'var(--teal)' : 'var(--card)',
+                          color: '#fff',
+                        }}
+                      >
                         {creditConsent && <span className="text-[10px] font-bold">✓</span>}
                       </div>
                       <div>
-                        <strong className="text-xs font-bold text-slate-900 block font-mono uppercase tracking-wide mb-0.5">
+                        <strong className="text-xs font-bold block font-mono uppercase tracking-wide mb-0.5" style={{ color: 'var(--ink)' }}>
                           Credit Inquiry Authorization
                         </strong>
-                        <p className="text-xs text-slate-600 leading-relaxed">
+                        <p className="text-xs leading-relaxed" style={{ color: 'var(--ink-3)' }}>
                           I authorize LenditBe to conduct background and credit checks through accredited reporting bureaus to establish my allowance tier or debt-to-income capacity.
                         </p>
                       </div>
                     </div>
                   </div>
 
-                  {/* FIX 8: flex-2 → grow */}
-                  <div className="flex items-center justify-between pt-3 border-t border-slate-100 gap-3">
+                  <div className="flex items-center justify-between pt-3 gap-3" style={{ borderTop: '1.5px solid var(--line)' }}>
                     <button className="btn-ghost flex-1 sm:flex-none" disabled={loading} onClick={() => { setGlobalError(''); setStep(2) }}>← Back</button>
                     <button
                       className="btn-primary grow sm:flex-none"
@@ -744,7 +808,7 @@ export default function VerifyForm({ currentStatus }: { currentStatus: string })
 
             </div>
 
-            <p className="text-center text-[11px] font-mono text-slate-400 mt-6 pb-8">
+            <p className="text-center text-[11px] font-mono mt-6 pb-8" style={{ color: 'var(--ink-4)' }}>
               256-BIT TLS ENCRYPTION // HARDWARE-ENFORCED LIVENESS
             </p>
 
