@@ -79,6 +79,12 @@ export default async function DashboardPage() {
     .limit(5)
 
   const kycStatus = borrower?.kyc_status ?? 'pending'
+  // A borrower's kyc_status is 'pending' both before they've ever submitted
+  // anything AND after they've submitted and are awaiting admin review.
+  // Since there's no dedicated "under_review" status in the schema yet,
+  // infer "already submitted" from the presence of an uploaded ID front image.
+  const kycSubmitted = kycStatus === 'pending' && !!borrower?.id_front_image_url
+
   const firstName = borrower?.first_name ?? user.email?.split('@')[0] ?? 'there'
   const isStudent = borrower?.employment_type === 'student'
 
@@ -324,17 +330,23 @@ export default async function DashboardPage() {
                 >
                   {kycStatus === 'rejected'
                     ? 'Your verification was not approved'
+                    : kycSubmitted
+                    ? 'Verification submitted — under review'
                     : 'Finish verifying your identity'}
                 </p>
                 <p className="text-sm" style={{ color: 'var(--ink-2)' }}>
                   {kycStatus === 'rejected'
                     ? 'Review the details on your profile and resubmit your ID.'
+                    : kycSubmitted
+                    ? "We're reviewing your documents. This usually takes a short while — check back soon."
                     : 'Our underwriting algorithm requires a verified profile before you can apply for a loan.'}
                 </p>
               </div>
-              <Link href="/profile/verify" className="btn-primary flex-shrink-0">
-                {kycStatus === 'rejected' ? 'Resubmit' : 'Verify now'}
-              </Link>
+              {!kycSubmitted && (
+                <Link href="/profile/verify" className="btn-primary flex-shrink-0">
+                  {kycStatus === 'rejected' ? 'Resubmit' : 'Verify now'}
+                </Link>
+              )}
             </div>
           )}
 
