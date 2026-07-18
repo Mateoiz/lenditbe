@@ -1,7 +1,7 @@
-// app/loans/page.tsx
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import ActiveLoanRow from './ActiveLoanRow'
 
 function peso(n: number) {
   return `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -168,42 +168,13 @@ export default async function LoansPage() {
                   const next = nextByLoan[loan.id]
                   const canPay = ['active', 'disbursed', 'approved', 'overdue'].includes(loan.status)
                   return (
-                    <Link key={loan.id} href={`/loans/${loan.id}`} className="loan-row" style={{ color: 'inherit' }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div className="flex items-center gap-2 mb-1 flex-wrap">
-                          <span className="font-serif text-lg" style={{ fontFamily: "'DM Serif Display',Georgia,serif", color: 'var(--ink)' }}>
-                            {peso(loan.principal_amount)}
-                          </span>
-                          <span className="status-pill" style={{ background: meta.bg, color: meta.color, borderColor: meta.border }}>
-                            {meta.label}
-                          </span>
-                        </div>
-                        <div className="font-mono text-xs flex flex-wrap gap-3" style={{ color: 'var(--ink-3)' }}>
-                          <span>Applied {formatDate(loan.applied_at)}</span>
-                          {loan.due_date && <span>Due {formatDate(loan.due_date)}</span>}
-                          {next && (
-                            <span style={{ color: loan.status === 'overdue' ? 'var(--red)' : 'var(--ink-3)' }}>
-                              Next payment: {peso(next.amount_due)} on {formatDate(next.due_date)}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3 flex-shrink-0">
-                        {canPay && (
-                          <Link
-                            href={`/loans/${loan.id}/pay`}
-                            onClick={e => e.stopPropagation()}
-                            className="btn-primary"
-                            style={{ padding: '8px 16px', fontSize: 12 }}
-                          >
-                            Pay now
-                          </Link>
-                        )}
-                        <svg className="chevron" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/>
-                        </svg>
-                      </div>
-                    </Link>
+                    <ActiveLoanRow
+                      key={loan.id}
+                      loan={loan}
+                      meta={meta}
+                      next={next}
+                      canPay={canPay}
+                    />
                   )
                 })}
               </div>

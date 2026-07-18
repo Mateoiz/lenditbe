@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { redirect, notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { submitPayment } from './actions'
+import PaymentFlow from './PaymentFlow'
 
 function peso(n: number) {
   return `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -59,6 +60,13 @@ export default async function PayPage({ params }: { params: Promise<{ id: string
 
   if (!nextInstallment) {
     // No unpaid installments — shouldn't be payable, redirect back
+    redirect(`/loans/${id}`)
+  }
+
+  if (outstanding <= 0) {
+    // Data mismatch guard: loan shows no outstanding balance but an
+    // installment is still marked unpaid. Don't let a broken UI state
+    // through — send back to loan details instead of crashing the form.
     redirect(`/loans/${id}`)
   }
 
@@ -243,102 +251,14 @@ export default async function PayPage({ params }: { params: Promise<{ id: string
             </div>
           </div>
 
-          {/* Payment form */}
-          <form action={payAction} className="card p-6" style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
-
-            {/* Amount */}
-            <div>
-              <label className="field-label">Payment amount</label>
-              <div className="amount-input-wrap">
-                <span className="amount-prefix">₱</span>
-                <input
-                  type="number"
-                  name="amount"
-                  className="amount-input"
-                  placeholder="0.00"
-                  min="0.01"
-                  max={outstanding}
-                  step="0.01"
-                  defaultValue={Number(nextInstallment.amount_due) - Number(nextInstallment.amount_paid)}
-                  required
-                />
-              </div>
-              {/* Quick-fill buttons — client-side via inline script */}
-              <div className="flex gap-2 mt-3 flex-wrap">
-                <button
-                  type="button"
-                  className="quick-fill-btn"
-                  style={{ color: 'var(--blue-mid)', borderColor: 'var(--blue-bdr)', background: 'var(--blue-bg)' }}
-                  onClick={() => {
-                    const el = document.querySelector<HTMLInputElement>('input[name="amount"]')
-                    if (el) el.value = String((Number(nextInstallment.amount_due) - Number(nextInstallment.amount_paid)).toFixed(2))
-                  }}
-                >
-                  Pay installment ({peso(Number(nextInstallment.amount_due) - Number(nextInstallment.amount_paid))})
-                </button>
-                <button
-                  type="button"
-                  className="quick-fill-btn"
-                  style={{ color: 'var(--green)', borderColor: 'var(--green-bdr)', background: 'var(--green-bg)' }}
-                  onClick={() => {
-                    const el = document.querySelector<HTMLInputElement>('input[name="amount"]')
-                    if (el) el.value = String(outstanding.toFixed(2))
-                  }}
-                >
-                  Pay in full ({peso(outstanding)})
-                </button>
-              </div>
-            </div>
-
-            {/* Payment channel */}
-            <div>
-              <label className="field-label">Payment method</label>
-              <div className="channel-grid">
-                {CHANNELS.map((ch) => (
-                  <label key={ch.value} className="channel-option">
-                    <input
-                      type="radio"
-                      name="channel"
-                      value={ch.value}
-                      defaultChecked={ch.value === 'gcash'}
-                      required
-                    />
-                    <span className="channel-label">
-                      <span className="channel-icon">{ch.icon}</span>
-                      {ch.label}
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            {/* Reference number */}
-            <div>
-              <label className="field-label">
-                Reference number{' '}
-                <span style={{ color: 'var(--ink-4)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
-                  (optional)
-                </span>
-              </label>
-              <input
-                type="text"
-                name="reference_number"
-                className="ref-input"
-                placeholder="e.g. GCash ref: 1234567890"
-                maxLength={80}
-              />
-            </div>
-
-            {/* Submit */}
-            <div>
-              <button type="submit" className="submit-btn">
-                Confirm payment
-              </button>
-              <p className="text-xs text-center mt-3" style={{ color: 'var(--ink-4)' }}>
-                Payment is recorded instantly and applied to your schedule.
-              </p>
-            </div>
-          </form>
+          {/* Payment flow: form -> loading -> receipt */}
+          <PaymentFlow
+            loanId={id}
+            installmentDue={Number(nextInstallment.amount_due) - Number(nextInstallment.amount_paid)}
+            outstanding={outstanding}
+            installmentNumber={nextInstallment.installment_number}
+            payAction={payAction}
+          />
         </main>
       </div>
     </>

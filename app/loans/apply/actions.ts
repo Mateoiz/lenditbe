@@ -36,10 +36,10 @@ function generateInstallmentSchedule(
   for (let i = 1; i <= numInstallments; i++) {
     const dueDate = new Date(startDate)
     dueDate.setDate(dueDate.getDate() + (intervalDays * i))
-    
+
     // Assign remainder centavos to the final installment so totals match 100%
     const isLast = i === numInstallments
-    const amountDue = isLast 
+    const amountDue = isLast
       ? Number((totalRepayable - accumulatedAmount).toFixed(2))
       : baseInstallmentAmount
 
@@ -87,6 +87,42 @@ export async function submitLoanApplication(formData: FormData) {
     throw new Error('Please wait a few minutes before submitting another application.')
   }
 
+  // CREDIT EXPOSURE GUARD: cap new loan by remaining available credit.
+  // Available credit = credit_limit - principal of all loans currently
+  // counted as exposure (approved, disbursed, active, overdue). Loans that
+  // are completed/rejected/pending don't count against exposure — pending
+  // hasn't been extended yet, and completed/rejected are settled.
+  const { data: openLoans } = await supabase
+    .from('loans')
+    .select('principal_amount')
+    .eq('borrower_id', user.id)
+    .in('status', ['approved', 'disbursed', 'active', 'overdue'])
+
+  const { data: borrowerRow } = await supabase
+    .from('borrowers')
+    .select('credit_limit')
+    .eq('id', user.id)
+    .single()
+
+  const outstandingPrincipal = (openLoans ?? []).reduce(
+    (sum, l) => sum + Number(l.principal_amount), 0
+  )
+  const creditLimit = Number(borrowerRow?.credit_limit ?? 0)
+  const availableCredit = Math.max(0, creditLimit - outstandingPrincipal)
+
+  if (principalAmount > availableCredit) {
+    const outstandingStr = outstandingPrincipal.toLocaleString('en-PH')
+    const limitStr = creditLimit.toLocaleString('en-PH')
+    const availableStr = availableCredit.toLocaleString('en-PH')
+
+    throw new Error(
+      outstandingPrincipal > 0
+        ? `This exceeds your available credit. You have ₱${outstandingStr} outstanding ` +
+          `against a ₱${limitStr} limit — your maximum new loan right now is ₱${availableStr}.`
+        : `This exceeds your credit limit of ₱${limitStr}.`
+    )
+  }
+
   // 1. RUN THE AUTOMATED UNDERWRITING ALGORITHM
   const assessment = await evaluateLoanApplication(supabase, {
     borrowerId: user.id,
@@ -125,7 +161,7 @@ export async function submitLoanApplication(formData: FormData) {
     p_rejection_reason: assessment.rejectionReason ?? null,
     p_approved_at:      assessment.approved ? new Date().toISOString() : null,
     p_due_date:         assessment.approved ? dueDateStr : null,
-p_installments:     schedule,
+    p_installments:     schedule,
   })
 
   if (error) throw new Error('Failed to create loan: ' + error.message)
