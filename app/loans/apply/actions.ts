@@ -70,6 +70,7 @@ export async function submitLoanApplication(formData: FormData) {
     .from('loans')
     .select('id')
     .eq('borrower_id', user.id)
+    .in('status', ['pending', 'active'])   // ← only block if there's a live loan
     .gte('created_at', fiveMinutesAgo)
     .maybeSingle()
 
