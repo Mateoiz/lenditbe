@@ -62,9 +62,7 @@ export default async function DashboardPage() {
   const isStudent = borrower?.employment_type === 'student'
 
   const completedCount = loans?.filter(l => l.status === 'completed').length || 0
-  const creditLimitValue = isStudent
-    ? (completedCount === 0 ? 500 : completedCount === 1 ? 1000 : 1500)
-    : (borrower?.credit_limit || (borrower?.monthly_income ? borrower.monthly_income * 0.15 : 2500))
+  const creditLimitValue = Number(borrower?.credit_limit ?? 0)
 
   const outstandingPrincipal = (loans ?? [])
     .filter(l => ['approved', 'disbursed', 'active', 'overdue'].includes(l.status))
@@ -214,31 +212,87 @@ export default async function DashboardPage() {
         <main className="max-w-6xl mx-auto px-6 sm:px-10 py-10">
 
           {/* ── Two-Column Hero Masthead Section ── */}
-          <section className="grid lg:grid-cols-[1.15fr_0.85fr] gap-12 items-center mb-10 pt-2">
-            <div>
-              <div className="flex items-center gap-3 flex-wrap mb-3">
-                <p className="font-mono text-xs uppercase tracking-widest" style={{ color: 'var(--ink-4)' }}>
+          <section className="mb-8 pt-2">
+            <div className="flex items-start justify-between gap-6 flex-wrap mb-5">
+              <div>
+                <p className="font-mono text-xs uppercase tracking-widest mb-2" style={{ color: 'var(--ink-4)' }}>
                   Account statement · {formatMonthYear(new Date())}
                 </p>
-                <span className="stamp" style={{ color: 'var(--ink-3)', borderColor: 'var(--line-md)' }}>
-                  Issued {formatDate(new Date().toISOString())}
-                </span>
+                <h1 className="font-display text-4xl sm:text-5xl leading-tight" style={{ color: 'var(--ink)', fontWeight: 500 }}>
+                  Welcome back, {firstName}.
+                </h1>
               </div>
-              
-              <h1 className="font-display text-4xl sm:text-5xl leading-tight mb-4" style={{ color: 'var(--ink)', fontWeight: 500 }}>
-                Welcome back, {firstName}.
-              </h1>
-              
-              <p className="text-base leading-relaxed mb-6" style={{ color: 'var(--ink-3)', maxWidth: 480 }}>
-                {priorityAlert 
-                  ? "We flagged an item on your account that requires your attention below." 
-                  : "Everything is on track — your portfolio, payment schedule, and available credit are up to date."}
-              </p>
+
+              {/* KYC verified + no loans → big Apply CTA */}
+              {kycStatus === 'verified' && !activeLoan && !pendingLoan && availableCredit >= 1000 && (
+                <Link href="/loans/apply" className="btn-primary flex-shrink-0 self-center">
+                  Apply for a loan →
+                </Link>
+              )}
             </div>
 
-            <div className="flex justify-center lg:justify-end" style={{ transform: 'rotate(1.2deg)' }}>
-              <HeroStatement />
-            </div>
+            {/* Context strip — changes based on account state */}
+            {kycStatus !== 'verified' ? null : activeLoan ? (
+              // Active loan → show repayment summary inline
+              <div className="ledger-card px-5 py-4 flex items-center gap-5 flex-wrap"
+                style={{ background: 'var(--teal-bg)', borderColor: 'var(--teal-bdr)' }}>
+                <div>
+                  <p className="font-mono text-[10px] uppercase tracking-widest mb-0.5" style={{ color: 'var(--teal-dark)' }}>Loan balance</p>
+                  <p className="font-display text-2xl" style={{ color: 'var(--teal-dark)', fontWeight: 500 }}>
+                    {peso(Number(activeLoan.total_repayable) - paidSoFar)}
+                  </p>
+                </div>
+                <div className="w-px self-stretch" style={{ background: 'var(--teal-bdr)' }} />
+                <div>
+                  <p className="font-mono text-[10px] uppercase tracking-widest mb-0.5" style={{ color: 'var(--teal-dark)' }}>Repaid</p>
+                  <p className="font-display text-2xl" style={{ color: 'var(--teal-dark)', fontWeight: 500 }}>{repaymentPct}%</p>
+                </div>
+                {nextInstallment && (
+                  <>
+                    <div className="w-px self-stretch" style={{ background: 'var(--teal-bdr)' }} />
+                    <div>
+                      <p className="font-mono text-[10px] uppercase tracking-widest mb-0.5" style={{ color: 'var(--teal-dark)' }}>Next due</p>
+                      <p className="font-display text-2xl" style={{ color: isOverdue ? 'var(--magenta)' : 'var(--teal-dark)', fontWeight: 500 }}>
+                        {formatDate(nextInstallment.due_date)}
+                      </p>
+                    </div>
+                  </>
+                )}
+                <Link href={`/loans/${activeLoan.id}/pay`} className="btn-primary ml-auto flex-shrink-0">
+                  Pay now →
+                </Link>
+              </div>
+            ) : completedCount > 0 ? (
+              // No active loan but has history → good standing prompt
+              <div className="ledger-card px-5 py-4 flex items-center justify-between gap-4 flex-wrap"
+                style={{ background: 'var(--teal-bg)', borderColor: 'var(--teal-bdr)' }}>
+                <div className="flex items-center gap-3">
+                  <span className="font-mono text-lg">✓</span>
+                  <div>
+                    <p className="text-sm font-semibold" style={{ color: 'var(--teal-dark)' }}>
+                      {completedCount} loan{completedCount !== 1 ? 's' : ''} paid off — great track record.
+                    </p>
+                    <p className="font-mono text-xs mt-0.5" style={{ color: 'var(--teal)' }}>
+                      {pesoShort(availableCredit)} available to borrow
+                    </p>
+                  </div>
+                </div>
+                <Link href="/loans/apply" className="btn-primary flex-shrink-0">Apply again →</Link>
+              </div>
+            ) : (
+              // Verified, no history → first loan prompt
+              <div className="ledger-card px-5 py-4 flex items-center justify-between gap-4 flex-wrap">
+                <div>
+                  <p className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>
+                    You're approved — {pesoShort(availableCredit)} ready to borrow.
+                  </p>
+                  <p className="text-xs mt-0.5 font-mono" style={{ color: 'var(--ink-3)' }}>
+                    Choose your amount and terms below.
+                  </p>
+                </div>
+                <Link href="/loans/apply" className="btn-primary flex-shrink-0">Apply now →</Link>
+              </div>
+            )}
           </section>
 
           {priorityAlert && (
@@ -387,10 +441,10 @@ export default async function DashboardPage() {
             </div>
           )}
 
-          {!activeLoan && !pendingLoan && (
+          {!activeLoan && !pendingLoan && kycStatus === 'verified' && (
             <div className="ledger-card p-6 mb-6">
               <p className="text-sm mb-4" style={{ color: 'var(--ink-2)' }}>You have no active loan right now.</p>
-              {kycStatus === 'verified' && availableCredit >= 1000 && (
+              {availableCredit >= 1000 && (
                 <Link href="/loans/apply" className="btn-primary">Apply for a loan</Link>
               )}
             </div>
