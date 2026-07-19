@@ -223,12 +223,6 @@ export default async function DashboardPage() {
                 </h1>
               </div>
 
-              {/* KYC verified + no loans → big Apply CTA */}
-              {kycStatus === 'verified' && !activeLoan && !pendingLoan && availableCredit >= 1000 && (
-                <Link href="/loans/apply" className="btn-primary flex-shrink-0 self-center">
-                  Apply for a loan →
-                </Link>
-              )}
             </div>
 
             {/* Context strip — changes based on account state */}
@@ -441,14 +435,11 @@ export default async function DashboardPage() {
             </div>
           )}
 
-          {!activeLoan && !pendingLoan && kycStatus === 'verified' && (
-            <div className="ledger-card p-6 mb-6">
-              <p className="text-sm mb-4" style={{ color: 'var(--ink-2)' }}>You have no active loan right now.</p>
-              {availableCredit >= 1000 && (
-                <Link href="/loans/apply" className="btn-primary">Apply for a loan</Link>
-              )}
-            </div>
-          )}
+{!activeLoan && !pendingLoan && kycStatus === 'verified' && (
+  <div className="ledger-card p-6 mb-6">
+    <p className="text-sm" style={{ color: 'var(--ink-2)' }}>You have no active loan right now.</p>
+  </div>
+)}
 
           {activeLoan && kycStatus === 'verified' && availableCredit >= 1000 && (
             <div className="mb-6">

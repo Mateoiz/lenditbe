@@ -6,6 +6,8 @@ import { redirect } from 'next/navigation'
 import { LoanApplicationSchema } from '@/lib/schemas'
 import { getValidInstallmentCounts } from '@/lib/installments'
 
+const PAYOUT_METHODS = ['gcash', 'maya', 'bank_transfer', 'cash_pickup'] as const
+
 function generateInstallmentSchedule(
   loanId: string,
   totalRepayable: number,
@@ -63,6 +65,42 @@ export async function submitLoanApplication(formData: FormData) {
     throw new Error(`Please choose a valid number of installments for a ${termDays}-day term.`)
   }
 
+  // ── PAYOUT DESTINATION ──
+  // Defaults to the borrower's saved disbursement details. The form may
+  // submit an override (use_custom_payout=1) with its own method/name/number.
+  const { data: borrower } = await supabase
+    .from('borrowers')
+    .select('disbursement_method, disbursement_account_name, disbursement_account_number')
+    .eq('id', user.id)
+    .maybeSingle()
+
+  const useCustomPayout = formData.get('use_custom_payout') === '1'
+
+  let payoutMethod: string | null
+  let payoutAccountName: string | null
+  let payoutAccountNumber: string | null
+
+  if (useCustomPayout) {
+    payoutMethod = formData.get('payout_method') as string
+    payoutAccountName = (formData.get('payout_account_name') as string)?.trim()
+    payoutAccountNumber = (formData.get('payout_account_number') as string)?.trim()
+
+    if (!payoutMethod || !PAYOUT_METHODS.includes(payoutMethod as any)) {
+      throw new Error('Please select a valid payout method.')
+    }
+    if (!payoutAccountName || !payoutAccountNumber) {
+      throw new Error('Please provide the payout account name and number.')
+    }
+  } else {
+    payoutMethod = borrower?.disbursement_method ?? null
+    payoutAccountName = borrower?.disbursement_account_name ?? null
+    payoutAccountNumber = borrower?.disbursement_account_number ?? null
+
+    if (!payoutMethod || !payoutAccountName || !payoutAccountNumber) {
+      throw new Error('Please add your payout details to your profile, or provide them below, before applying.')
+    }
+  }
+
   // RATE LIMIT GUARD
   const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString()
 
@@ -104,7 +142,7 @@ export async function submitLoanApplication(formData: FormData) {
     ? generateInstallmentSchedule("", totalRepayable, termDays, numInstallments, new Date())
     : []
 
-  const { data: loanId, error } = await supabase.rpc('create_loan_with_schedule', {
+  const { data: loanId, error } = await supabase.rpc('create_loan_with_schedule_and_payout', {
     p_borrower_id:      user.id,
     p_principal:        principalAmount,
     p_term_days:        termDays,
@@ -118,6 +156,9 @@ export async function submitLoanApplication(formData: FormData) {
     p_approved_at:      assessment.approved ? new Date().toISOString() : null,
     p_due_date:         assessment.approved ? dueDateStr : null,
     p_installments:     schedule,
+    p_payout_method:         payoutMethod,
+    p_payout_account_name:   payoutAccountName,
+    p_payout_account_number: payoutAccountNumber,
   })
 
   if (error) throw new Error('Failed to create loan: ' + error.message)
