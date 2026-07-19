@@ -22,14 +22,22 @@ export interface UnderwritingResult {
 }
 
 interface ScoreBreakdown {
-  base:          number
-  repaymentBonus: number
+  base:            number
+  repaymentBonus:  number
   employmentBonus: number
-  incomeBonus:   number
-  defaultPenalty: number
-  overduePenalty: number
-  dtiPenalty:    number
-  flags:         string[]
+  incomeBonus:     number
+  defaultPenalty:  number
+  overduePenalty:  number
+  dtiPenalty:      number
+  flags:           string[]
+}
+
+// computeScore returns the breakdown AND the final clamped score so the
+// caller never has to recompute it from the components (which could diverge
+// after clamping).
+interface ScoreResult {
+  breakdown: ScoreBreakdown
+  score:     number
 }
 
 // ─────────────────────────────────────────────
@@ -74,7 +82,7 @@ interface HardStop {
 function checkHardStops(
   borrower: any,
   principalAmount: number,
-  outstandingPrincipal: number   // sum of principal across approved/disbursed/active/overdue loans
+  outstandingPrincipal: number
 ): HardStop {
   // 1. KYC must be verified
   if (borrower.kyc_status !== 'verified') {
@@ -82,9 +90,9 @@ function checkHardStops(
   }
 
   // 2. Available credit must cover the new request. Overdue loans are
-  // included in outstandingPrincipal like any other open loan — they
-  // reduce headroom but don't block outright. Repayment-behavior risk
-  // from being overdue is instead captured as a scoring penalty below.
+  // included in outstandingPrincipal like any other open loan — they reduce
+  // headroom but don't block outright. Repayment-behavior risk is instead
+  // captured as a scoring penalty.
   const creditLimit = Number(borrower.credit_limit ?? 0)
   const availableCredit = Math.max(0, creditLimit - outstandingPrincipal)
   if (principalAmount > availableCredit) {
@@ -110,24 +118,54 @@ function checkHardStops(
 }
 
 // ─────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────
+
+// FIX #1 — DTI: existingMonthlyObligation was the raw sum of ALL remaining
+// installment amounts across all open loans, which wildly overstated the
+// monthly burden (e.g. 12 × ₱1,000 remaining → treated as ₱12,000/month).
+//
+// Correct approach: for each open loan take only its NEXT unpaid installment
+// (the one that represents the upcoming month's obligation), then sum those.
+// Since installments are fetched ordered by installment_number ASC, the first
+// entry we encounter per loan_id is that loan's next-due installment.
+//
+// This means the query must include installment_number and be sorted ascending
+// (see the query in evaluateLoanApplication).
+function computeMonthlyObligation(installments: any[]): number {
+  const nextDueByLoan = new Map<string, number>()
+  for (const inst of installments) {
+    if (!nextDueByLoan.has(inst.loan_id)) {
+      // First entry per loan = smallest installment_number = next due
+      nextDueByLoan.set(inst.loan_id, Number(inst.amount_due))
+    }
+  }
+  return Array.from(nextDueByLoan.values()).reduce((sum, v) => sum + v, 0)
+}
+
+// ─────────────────────────────────────────────
 // SCORE COMPUTATION
 // ─────────────────────────────────────────────
 
 function computeScore(
-  borrower:        any,
-  principalAmount: number,
-  termDays:        number,
-  loanHistory:     any[],
-  installments:    any[],
-  hasOpenOverdue:  boolean,        // does the borrower currently have an overdue loan
-  existingMonthlyObligation: number // sum of upcoming/due installment amounts on other open loans
-): ScoreBreakdown {
+  borrower:                  any,
+  principalAmount:           number,
+  termDays:                  number,
+  loanHistory:               any[],   // completed + defaulted only (no overdue — see note below)
+  installments:              any[],   // unpaid installments on open loans, ordered by installment_number ASC
+  hasOpenOverdue:            boolean, // derived from openLoans, not loanHistory
+  existingMonthlyObligation: number   // pre-computed via computeMonthlyObligation()
+): ScoreResult {
   const flags: string[] = []
   let score = BASE_SCORE
 
   // ── 1. Repayment history ──
-  const completedLoans  = loanHistory.filter(l => l.status === 'completed')
-  const defaultedLoans  = loanHistory.filter(l => l.status === 'defaulted')
+  // FIX #2 — overdue double-count: loanHistory no longer includes 'overdue'
+  // rows (they were moved to openLoans). hasOpenOverdue already captures the
+  // current overdue signal. Counting overdue from BOTH sources would penalize
+  // the borrower twice for the same loan.
+  const completedLoans = loanHistory.filter(l => l.status === 'completed')
+  const defaultedLoans = loanHistory.filter(l => l.status === 'defaulted')
 
   const repaymentBonus = Math.min(completedLoans.length, 3) * POINTS_PER_COMPLETED_LOAN
   score += repaymentBonus
@@ -137,18 +175,15 @@ function computeScore(
   score -= defaultPenalty
   if (defaultedLoans.length > 0) flags.push(`${defaultedLoans.length} defaulted loan(s)`)
 
-  // Overdue is now purely a scoring signal (no hard stop). Penalize any
-  // currently-open overdue loan, plus any overdue loans in history.
-  const historicalOverdue = loanHistory.filter(l => l.status === 'overdue').length
-  const overdueCount = historicalOverdue + (hasOpenOverdue ? 1 : 0)
-  const overduePenalty = overdueCount * PENALTY_PER_OVERDUE
+  // Open overdue penalty — single source of truth from hasOpenOverdue
+  const overduePenalty = hasOpenOverdue ? PENALTY_PER_OVERDUE : 0
   score -= overduePenalty
-  if (overdueCount > 0) flags.push(`${overdueCount} overdue loan(s)`)
+  if (hasOpenOverdue) flags.push('Currently has an overdue loan')
 
   // ── 2. Installment payment behaviour ──
   let incomeBonus = 0
   const totalInstallments = installments.length
-  const paidOnTime = installments.filter(i => i.status === 'paid').length
+  const paidOnTime        = installments.filter(i => i.status === 'paid').length
   const overdueInstallments = installments.filter(i => i.status === 'overdue').length
 
   let repaymentBonus2 = 0
@@ -170,12 +205,10 @@ function computeScore(
   flags.push(`Employment: ${borrower.employment_type}`)
 
   // ── 4. Debt-to-income ratio ──
-  // Fixed: termMonths now derives from the actual term length instead of
-  // the old `30/30` shortcut (which always evaluated to 1 regardless of
-  // term, overstating monthly burden on longer loans). Also folds in
-  // obligations from the borrower's OTHER open loans, since concurrent
-  // loans are now allowed and DTI has to reflect total burden, not just
-  // the loan being applied for.
+  // existingMonthlyObligation is now the sum of each open loan's NEXT
+  // installment only (see computeMonthlyObligation), so this correctly
+  // reflects the borrower's actual current monthly burden rather than the
+  // total of all future payments.
   const effectiveIncome: number =
     borrower.employment_type === 'student'
       ? (borrower.guardian_monthly_income ?? 0)
@@ -184,7 +217,7 @@ function computeScore(
   let dtiPenalty = 0
   if (effectiveIncome > 0) {
     const termMonths = Math.max(1, termDays / 30)
-    const newLoanMonthlyPayment = principalAmount / termMonths
+    const newLoanMonthlyPayment  = principalAmount / termMonths
     const estimatedMonthlyPayment = newLoanMonthlyPayment + existingMonthlyObligation
     const dtiRatio = estimatedMonthlyPayment / effectiveIncome
 
@@ -205,17 +238,23 @@ function computeScore(
   score -= dtiPenalty
   score += incomeBonus
 
-  score = Math.max(0, Math.min(100, score))
+  // FIX #3 — clamp once here and return the clamped value. The caller uses
+  // this directly instead of recomputing from breakdown components, which
+  // could diverge after clamping.
+  const finalScore = Math.max(0, Math.min(100, score))
 
   return {
-    base:           BASE_SCORE,
-    repaymentBonus: repaymentBonus + repaymentBonus2,
-    employmentBonus,
-    incomeBonus,
-    defaultPenalty,
-    overduePenalty,
-    dtiPenalty,
-    flags,
+    score: finalScore,
+    breakdown: {
+      base:            BASE_SCORE,
+      repaymentBonus:  repaymentBonus + repaymentBonus2,
+      employmentBonus,
+      incomeBonus,
+      defaultPenalty,
+      overduePenalty,
+      dtiPenalty,
+      flags,
+    },
   }
 }
 
@@ -231,6 +270,11 @@ function getPricing(score: number): { interestRate: number; serviceFeeRate: numb
 // ─────────────────────────────────────────────
 // MAIN EXPORT
 // ─────────────────────────────────────────────
+
+const EMPTY_BREAKDOWN: ScoreBreakdown = {
+  base: 0, repaymentBonus: 0, employmentBonus: 0, incomeBonus: 0,
+  defaultPenalty: 0, overduePenalty: 0, dtiPenalty: 0, flags: [],
+}
 
 export async function evaluateLoanApplication(
   supabase: SupabaseClient,
@@ -250,27 +294,34 @@ export async function evaluateLoanApplication(
       .eq('id', borrowerId)
       .single(),
 
+    // FIX #2 — 'overdue' removed from loanHistory. An overdue loan is an
+    // OPEN loan (it still appears in openLoans), not a historical one.
+    // Including it here AND deriving hasOpenOverdue from openLoans was
+    // penalizing the borrower twice for the same loan.
     supabase
       .from('loans')
       .select('status')
       .eq('borrower_id', borrowerId)
-      .in('status', ['completed', 'defaulted', 'overdue']),
+      .in('status', ['completed', 'defaulted']),
 
-    // All currently-open loans (including overdue) — used for both
-    // available-credit calc and the "has open overdue" scoring flag.
+    // All currently-open loans (including overdue) — used for available-
+    // credit calc and the hasOpenOverdue scoring flag.
     supabase
       .from('loans')
       .select('id, status, principal_amount')
       .eq('borrower_id', borrowerId)
       .in('status', ['approved', 'disbursed', 'active', 'overdue']),
 
-    // Unpaid installments belonging to those open loans, for DTI.
+    // FIX #1 — installment_number added and results ordered ASC so that
+    // computeMonthlyObligation can take the first (next-due) installment
+    // per loan without a secondary sort.
     supabase
       .from('loan_installments')
-      .select('status, amount_due, loan_id, loans!inner(borrower_id, status)')
+      .select('status, amount_due, loan_id, installment_number, loans!inner(borrower_id, status)')
       .eq('loans.borrower_id', borrowerId)
       .in('loans.status', ['approved', 'disbursed', 'active', 'overdue'])
-      .in('status', ['upcoming', 'due', 'overdue']),
+      .in('status', ['upcoming', 'due', 'overdue'])
+      .order('installment_number', { ascending: true }),
   ])
 
   if (!borrower) {
@@ -281,7 +332,7 @@ export async function evaluateLoanApplication(
       interestRate: 0,
       serviceFeeRate: 0,
       rejectionReason: 'Borrower profile not found.',
-      scoreBreakdown: { base: 0, repaymentBonus: 0, employmentBonus: 0, incomeBonus: 0, defaultPenalty: 0, overduePenalty: 0, dtiPenalty: 0, flags: [] },
+      scoreBreakdown: { ...EMPTY_BREAKDOWN, flags: ['Borrower not found'] },
     }
   }
 
@@ -289,9 +340,9 @@ export async function evaluateLoanApplication(
     (sum, l) => sum + Number(l.principal_amount), 0
   )
   const hasOpenOverdue = (openLoans ?? []).some(l => l.status === 'overdue')
-  const existingMonthlyObligation = (installments ?? []).reduce(
-    (sum, i) => sum + Number(i.amount_due), 0
-  )
+
+  // FIX #1 — monthly obligation derived from next-due installment per loan
+  const existingMonthlyObligation = computeMonthlyObligation(installments ?? [])
 
   // ── Hard stops first ──
   const hardStop = checkHardStops(borrower, principalAmount, outstandingPrincipal)
@@ -303,12 +354,14 @@ export async function evaluateLoanApplication(
       interestRate: 0,
       serviceFeeRate: 0,
       rejectionReason: hardStop.reason,
-      scoreBreakdown: { base: 0, repaymentBonus: 0, employmentBonus: 0, incomeBonus: 0, defaultPenalty: 0, overduePenalty: 0, dtiPenalty: 0, flags: ['Hard stop triggered'] },
+      scoreBreakdown: { ...EMPTY_BREAKDOWN, flags: ['Hard stop triggered'] },
     }
   }
 
   // ── Score ──
-  const breakdown = computeScore(
+  // FIX #3 — use the score returned by computeScore directly. No
+  // recomputation from breakdown components (which could diverge post-clamp).
+  const { score: finalScore, breakdown } = computeScore(
     borrower,
     principalAmount,
     termDays,
@@ -317,16 +370,6 @@ export async function evaluateLoanApplication(
     hasOpenOverdue,
     existingMonthlyObligation
   )
-
-  const finalScore = Math.max(0, Math.min(100,
-    breakdown.base +
-    breakdown.repaymentBonus +
-    breakdown.employmentBonus +
-    breakdown.incomeBonus -
-    breakdown.defaultPenalty -
-    breakdown.overduePenalty -
-    breakdown.dtiPenalty
-  ))
 
   const approved = finalScore >= APPROVAL_THRESHOLD
   const pricing  = getPricing(finalScore)

@@ -40,7 +40,23 @@ type SavedPayout = {
   accountNumber: string | null
 }
 
-export default function ApplyForm({ savedPayout, availableCredit }: { savedPayout: SavedPayout; availableCredit: number }) {
+type SavedAddress = {
+  addressLine: string | null
+  barangay: string | null
+  city: string | null
+  province: string | null
+  postalCode: string | null
+}
+
+export default function ApplyForm({
+  savedPayout,
+  savedAddress,
+  availableCredit,
+}: {
+  savedPayout: SavedPayout
+  savedAddress: SavedAddress
+  availableCredit: number
+}) {
   const searchParams = useSearchParams()
   const isFinancing = searchParams.get('financing') === '1'
   const itemName = searchParams.get('item')
@@ -348,6 +364,60 @@ export default function ApplyForm({ savedPayout, availableCredit }: { savedPayou
                 ))}
               </select>
             </label>
+
+            {/* ── Shipping Address (shown only in financing mode) ── */}
+            {isFinancing && (
+              <div className="flex flex-col gap-3">
+                <span className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>
+                  Shipping address
+                </span>
+                <input
+                  type="text"
+                  name="shipping_address_line"
+                  required
+                  placeholder="House/unit no., street"
+                  defaultValue={savedAddress.addressLine ?? ''}
+                  className="field-input"
+                />
+                <div className="grid grid-cols-2 gap-3">
+                  <input
+                    type="text"
+                    name="shipping_barangay"
+                    required
+                    placeholder="Barangay"
+                    defaultValue={savedAddress.barangay ?? ''}
+                    className="field-input"
+                  />
+                  <input
+                    type="text"
+                    name="shipping_city"
+                    required
+                    placeholder="City/Municipality"
+                    defaultValue={savedAddress.city ?? ''}
+                    className="field-input"
+                  />
+                  <input
+                    type="text"
+                    name="shipping_province"
+                    required
+                    placeholder="Province"
+                    defaultValue={savedAddress.province ?? ''}
+                    className="field-input"
+                  />
+                  <input
+                    type="text"
+                    name="shipping_postal_code"
+                    required
+                    placeholder="Postal code"
+                    defaultValue={savedAddress.postalCode ?? ''}
+                    className="field-input"
+                  />
+                </div>
+                <span className="text-xs font-mono" style={{ color: 'var(--ink-4)' }}>
+                  Pre-filled from your profile. Edit if shipping somewhere else.
+                </span>
+              </div>
+            )}
 
             {/* ── Disbursement / payout destination (hidden in financing mode) ── */}
             {isFinancing ? (

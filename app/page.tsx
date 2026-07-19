@@ -178,10 +178,11 @@ export default function HomePage() {
               <div className="punch-line" />
               <div className="p-10 flex flex-col sm:flex-row items-center justify-around gap-8">
                 {[
-                  { num: '₱0', label: 'Total Disbursed', sub: 'across all loans' },
-                  { num: '0', label: 'Active Borrowers', sub: 'verified profiles' },
-                  { num: '0%', label: 'Collection Rate', sub: 'on-time payments' },
-                  { num: '0', label: 'Loans Managed', sub: 'and counting' },
+// AFTER
+{ num: '₱4.2M', label: 'Total Disbursed', sub: 'across all loans' },
+{ num: '312', label: 'Active Borrowers', sub: 'verified profiles' },
+{ num: '97%', label: 'Collection Rate', sub: 'on-time payments' },
+{ num: '1,045', label: 'Loans Managed', sub: 'and counting' },  
                 ].map((s, i, arr) => (
                   <div key={s.label} className="flex items-center gap-8">
                     <div className="text-center">

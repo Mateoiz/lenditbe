@@ -8,6 +8,7 @@ import PaymentFlow from './PaymentFlow'
 function peso(n: number) {
   return `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
+
 function formatDate(d: string | null) {
   if (!d) return '—'
   return new Date(d).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })
@@ -28,11 +29,9 @@ export default async function PayPage({ params }: { params: Promise<{ id: string
 
   if (loanError || !loan) notFound()
 
-  const canPay = ['active', 'disbursed', 'approved', 'overdue'].includes(loan.status)
+  // 1. FIX: Exclude 'approved' — loan must be released before accepting payments
+  const canPay = ['active', 'disbursed', 'overdue'].includes(loan.status)
 
-  // "Unpaid" is derived from amount_paid < amount_due rather than a status
-  // string list, so a status value we haven't accounted for can never
-  // silently skip an installment that's still owed.
   const { data: installments, error: instError } = await supabase
     .from('loan_installments')
     .select('*')
@@ -51,7 +50,7 @@ export default async function PayPage({ params }: { params: Promise<{ id: string
     inst => Number(inst.amount_paid) < Number(inst.amount_due)
   )
 
-  // Explain dead-ends on the page instead of silently redirecting away.
+  // 2. FIX: Explain dead-ends on the page, including the 'approved' pre-disbursement state
   let blocked: { title: string; body: string } | null = null
 
   if (loanError || instError || paymentsError) {
@@ -61,12 +60,12 @@ export default async function PayPage({ params }: { params: Promise<{ id: string
     }
   } else if (!canPay) {
     blocked = {
-      title: 'This loan isn\u2019t open for payment',
-      body: loan.status === 'completed'
-        ? 'This loan has already been fully paid off.'
-        : loan.status === 'pending'
-        ? 'This loan is still under review.'
-        : 'This loan is not currently accepting payments.',
+      title: 'Payments unavailable',
+      body:
+        loan.status === 'completed' ? 'This loan has already been paid off in full.'
+        : loan.status === 'pending'  ? 'This loan application is currently under review.'
+        : loan.status === 'approved' ? 'This loan has been approved but not yet disbursed. Payments will be accepted once funds are released.'
+        : 'This loan is not open for payment processing at this time.',
     }
   } else if (!nextInstallment || outstanding <= 0) {
     blocked = {
@@ -80,6 +79,7 @@ export default async function PayPage({ params }: { params: Promise<{ id: string
     : Math.max(0, Number(nextInstallment!.amount_due) - Number(nextInstallment!.amount_paid))
 
   const payAction = blocked ? null : submitPayment.bind(null, id, nextInstallment!.id)
+  const progressPct = Math.min(100, Math.round((totalPaid / Number(loan.total_repayable || 1)) * 100))
 
   return (
     <>
@@ -200,7 +200,7 @@ export default async function PayPage({ params }: { params: Promise<{ id: string
                 <div className="progress-track">
                   <div
                     className="progress-fill"
-                    style={{ width: `${Math.min(100, Math.round((totalPaid / Number(loan.total_repayable)) * 100))}%` }}
+                    style={{ width: `${progressPct}%` }}
                   />
                 </div>
               </div>

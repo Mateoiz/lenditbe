@@ -1,7 +1,4 @@
 // src/lib/installments.ts
-// Plain shared module — NOT a server action file. Both the client apply
-// page and the server action import from here, so the valid-count logic
-// only lives in one place.
 
 export const MIN_INSTALLMENT_INTERVAL_DAYS = 7
 
@@ -13,9 +10,10 @@ export type InstallmentInsert = {
   status: 'upcoming'
 }
 
-// Given a term length, what installment counts actually make sense.
-// Used to validate the borrower's choice server-side and to build the
-// options list shown on the form.
+/**
+ * Given a term length in days, returns an array of valid installment counts
+ * ensuring payments are spaced at least MIN_INSTALLMENT_INTERVAL_DAYS apart (capped at 6).
+ */
 export function getValidInstallmentCounts(termDays: number): number[] {
   const maxCount = Math.max(1, Math.floor(termDays / MIN_INSTALLMENT_INTERVAL_DAYS))
   const counts: number[] = []
@@ -25,49 +23,45 @@ export function getValidInstallmentCounts(termDays: number): number[] {
   return counts
 }
 
+/**
+ * Generates an exact installment schedule honoring the user-selected installment count.
+ * Automatically handles uneven date distributions and cent rounding reconciliation.
+ */
 export function generateInstallmentSchedule(
   loanId: string,
-  principalAmount: number,
+  principalAmount: number, // Retained in signature for interface compatibility/future interest breakdowns
   totalRepayable: number,
   termDays: number,
+  numInstallments: number,
   startDate: Date
 ): InstallmentInsert[] {
-  const installments: InstallmentInsert[] = []
-
-  // Determine frequency
-  const frequency =
-    termDays <= 14  ? 'single'    :  // bullet payment
-    termDays <= 31  ? 'biweekly'  :  // 2 payments
-    termDays <= 90  ? 'monthly'   :  // monthly
-                      'monthly'      // monthly default
-
-  if (frequency === 'single') {
-    const dueDate = new Date(startDate)
-    dueDate.setDate(dueDate.getDate() + termDays)
-    return [{
-      loan_id: loanId,
-      installment_number: 1,
-      due_date: dueDate.toISOString().split('T')[0],
-      amount_due: totalRepayable,
-      status: 'upcoming'
-    }]
+  // 1. Defensive Validation: Ensure the requested installment count is mathematically valid
+  const validCounts = getValidInstallmentCounts(termDays)
+  if (!validCounts.includes(numInstallments)) {
+    throw new Error(
+      `Invalid installment count (${numInstallments}) for a ${termDays}-day term. Valid options: ${validCounts.join(', ')}.`
+    )
   }
 
-  const intervalDays = frequency === 'biweekly' ? 14 : 30
-  const count = Math.floor(termDays / intervalDays)
-  const perInstallment = parseFloat((totalRepayable / count).toFixed(2))
+  const installments: InstallmentInsert[] = []
+
+  // 2. Base calculation: round down to the nearest cent for standard installments
+  const perInstallment = Math.round((totalRepayable / numInstallments) * 100) / 100
   let runningTotal = 0
 
-  for (let i = 1; i <= count; i++) {
+  for (let i = 1; i <= numInstallments; i++) {
+    // 3. Proportional Date Math: guarantees the final installment lands exactly on maturity date
+    const dayOffset = Math.round((termDays / numInstallments) * i)
     const dueDate = new Date(startDate)
-    dueDate.setDate(dueDate.getDate() + intervalDays * i)
+    dueDate.setDate(dueDate.getDate() + dayOffset)
 
-    // Last installment absorbs rounding difference
-    const amount = i === count
-      ? parseFloat((totalRepayable - runningTotal).toFixed(2))
+    // 4. Cent Reconciliation: The final installment absorbs any floating-point rounding residue
+    const amount = i === numInstallments
+      ? Math.round((totalRepayable - runningTotal) * 100) / 100
       : perInstallment
 
-    runningTotal += perInstallment
+    runningTotal = Math.round((runningTotal + amount) * 100) / 100
+
     installments.push({
       loan_id: loanId,
       installment_number: i,

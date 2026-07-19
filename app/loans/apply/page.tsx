@@ -12,7 +12,7 @@ export default async function LoanApplyPage() {
   const [{ data: borrower }, credit] = await Promise.all([
     supabase
       .from('borrowers')
-      .select('disbursement_method, disbursement_account_name, disbursement_account_number')
+      .select('disbursement_method, disbursement_account_name, disbursement_account_number, address_line, barangay, city, province, postal_code')
       .eq('id', user.id)
       .maybeSingle(),
     getAvailableCredit(supabase, user.id),
@@ -24,6 +24,13 @@ export default async function LoanApplyPage() {
         method: borrower?.disbursement_method ?? null,
         accountName: borrower?.disbursement_account_name ?? null,
         accountNumber: borrower?.disbursement_account_number ?? null,
+      }}
+      savedAddress={{
+        addressLine: borrower?.address_line ?? null,
+        barangay: borrower?.barangay ?? null,
+        city: borrower?.city ?? null,
+        province: borrower?.province ?? null,
+        postalCode: borrower?.postal_code ?? null,
       }}
       availableCredit={credit.availableCredit}
     />

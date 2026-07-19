@@ -1,185 +1,205 @@
+// app/loans/apply/actions.ts
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
-import { evaluateLoanApplication } from '@/lib/underwriting'
 import { redirect } from 'next/navigation'
-import { LoanApplicationSchema } from '@/lib/schemas'
-import { getValidInstallmentCounts } from '@/lib/installments'
+import { getValidInstallmentCounts, MIN_INSTALLMENT_INTERVAL_DAYS } from '@/lib/installments'
 
-const PAYOUT_METHODS = ['gcash', 'maya', 'bank_transfer', 'cash_pickup'] as const
+interface EligibilityResult {
+  eligible: boolean
+  reason: string | null
+}
 
-function generateInstallmentSchedule(
-  loanId: string,
-  totalRepayable: number,
-  termDays: number,
-  numInstallments: number,
-  startDate: Date
-) {
-  const intervalDays = Math.round(termDays / numInstallments)
-  const baseInstallmentAmount = Math.floor((totalRepayable / numInstallments) * 100) / 100
-  const schedule = []
-  let accumulatedAmount = 0
+function checkEligibility(params: {
+  requestedAmount: number
+  creditLimit: number
+  kycStatus: string
+  activeLoanCount: number
+  hasOverdueLoan: boolean
+}): EligibilityResult {
+  const { requestedAmount, creditLimit, kycStatus, activeLoanCount, hasOverdueLoan } = params
 
-  for (let i = 1; i <= numInstallments; i++) {
-    const dueDate = new Date(startDate)
-    const isLast = i === numInstallments
-    dueDate.setDate(dueDate.getDate() + (isLast ? termDays : intervalDays * i))
-
-    const amountDue = isLast
-      ? Number((totalRepayable - accumulatedAmount).toFixed(2))
-      : baseInstallmentAmount
-
-    accumulatedAmount += amountDue
-
-    schedule.push({
-      loan_id: loanId,
-      installment_number: i,
-      due_date: dueDate.toISOString().split('T')[0],
-      amount_due: amountDue,
-      status: 'upcoming'
-    })
+  if (kycStatus !== 'verified') {
+    return { eligible: false, reason: 'Your identity verification is not yet complete.' }
+  }
+  if (hasOverdueLoan) {
+    return { eligible: false, reason: 'You have an overdue loan that must be settled first.' }
+  }
+  if (activeLoanCount >= 2) {
+    return { eligible: false, reason: 'You already have the maximum number of active loans.' }
+  }
+  if (requestedAmount > creditLimit) {
+    return { eligible: false, reason: 'Requested amount exceeds your current credit limit.' }
+  }
+  if (requestedAmount < 1000 || requestedAmount > 50000) {
+    return { eligible: false, reason: 'Loan amount must be between ₱1,000 and ₱50,000.' }
   }
 
-  return schedule
+  return { eligible: true, reason: null }
 }
 
 export async function submitLoanApplication(formData: FormData) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
 
-  if (!user) throw new Error('Not authenticated')
-
-  // ── FINANCING TYPE ──
-  // 'item' = product financing via available credit, no cash disbursed.
-  // 'cash' (default) = original loan-to-borrower flow, unchanged below.
+  const principalAmount = Number(formData.get('principal_amount'))
+  const termDays = Number(formData.get('term_days'))
+  const numInstallments = Number(formData.get('num_installments'))
+  const purpose = String(formData.get('purpose') ?? '')
   const financingType = formData.get('financing_type') as string | null
+  const itemName = formData.get('item_name') as string | null
   const isFinancing = financingType === 'item'
-  const itemName = (formData.get('item_name') as string)?.trim() || null
 
-  const parsed = LoanApplicationSchema.safeParse({
-    principal_amount: parseFloat(formData.get('principal_amount') as string),
-    term_days:        parseInt(formData.get('term_days') as string, 10),
-    purpose:          formData.get('purpose'),
-  })
-  if (!parsed.success) {
-    throw new Error(parsed.error.issues[0].message)
-  }
-  const { principal_amount: principalAmount, term_days: termDays, purpose } = parsed.data
-
-  // Fold the item name into purpose since there's no dedicated column yet —
-  // keeps this traceable in the underwriting rejection reason / loan record.
-  const effectivePurpose = isFinancing && itemName ? `Item financing: ${itemName}` : purpose
-
-  const numInstallments = parseInt(formData.get('num_installments') as string, 10)
   const validCounts = getValidInstallmentCounts(termDays)
-  if (!Number.isInteger(numInstallments) || !validCounts.includes(numInstallments)) {
-    throw new Error(`Please choose a valid number of installments for a ${termDays}-day term.`)
+  if (!validCounts.includes(numInstallments)) {
+    throw new Error('Selected installment count is not valid for this loan term.')
   }
 
-  // ── PAYOUT DESTINATION ──
-  // Financing loans never disburse cash to the borrower — the amount is
-  // drawn against their available credit for a merchant item — so there's
-  // nothing to collect here at all.
   let payoutMethod: string | null = null
   let payoutAccountName: string | null = null
   let payoutAccountNumber: string | null = null
 
-  if (!isFinancing) {
-    // Defaults to the borrower's saved disbursement details. The form may
-    // submit an override (use_custom_payout=1) with its own method/name/number.
-    const { data: borrower } = await supabase
-      .from('borrowers')
-      .select('disbursement_method, disbursement_account_name, disbursement_account_number')
-      .eq('id', user.id)
-      .maybeSingle()
+  let shippingAddressLine: string | null = null
+  let shippingBarangay: string | null = null
+  let shippingCity: string | null = null
+  let shippingProvince: string | null = null
+  let shippingPostalCode: string | null = null
 
-    const useCustomPayout = formData.get('use_custom_payout') === '1'
+  if (isFinancing) {
+    shippingAddressLine = String(formData.get('shipping_address_line') ?? '')
+    shippingBarangay = String(formData.get('shipping_barangay') ?? '')
+    shippingCity = String(formData.get('shipping_city') ?? '')
+    shippingProvince = String(formData.get('shipping_province') ?? '')
+    shippingPostalCode = String(formData.get('shipping_postal_code') ?? '')
 
-    if (useCustomPayout) {
-      payoutMethod = formData.get('payout_method') as string
-      payoutAccountName = (formData.get('payout_account_name') as string)?.trim()
-      payoutAccountNumber = (formData.get('payout_account_number') as string)?.trim()
+    if (!shippingAddressLine || !shippingBarangay || !shippingCity || !shippingProvince || !shippingPostalCode) {
+      throw new Error('Complete shipping address is required for financed items.')
+    }
+  } else {
+    payoutMethod = String(formData.get('payout_method') ?? '')
+    payoutAccountName = String(formData.get('payout_account_name') ?? '')
+    payoutAccountNumber = String(formData.get('payout_account_number') ?? '')
 
-      if (!payoutMethod || !PAYOUT_METHODS.includes(payoutMethod as any)) {
-        throw new Error('Please select a valid payout method.')
-      }
-      if (!payoutAccountName || !payoutAccountNumber) {
-        throw new Error('Please provide the payout account name and number.')
-      }
-    } else {
-      payoutMethod = borrower?.disbursement_method ?? null
-      payoutAccountName = borrower?.disbursement_account_name ?? null
-      payoutAccountNumber = borrower?.disbursement_account_number ?? null
-
-      if (!payoutMethod || !payoutAccountName || !payoutAccountNumber) {
-        throw new Error('Please add your payout details to your profile, or provide them below, before applying.')
-      }
+    if (!payoutMethod || !payoutAccountName || !payoutAccountNumber) {
+      throw new Error('Payout details are required.')
     }
   }
 
-  // RATE LIMIT GUARD
-  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString()
-
-  const { data: recentApplication } = await supabase
-    .from('loans')
-    .select('id')
-    .eq('borrower_id', user.id)
-    .in('status', ['pending', 'active'])   // ← only block if there's a live loan
-    .gte('created_at', fiveMinutesAgo)
+  const { data: borrower, error: borrowerError } = await supabase
+    .from('borrowers')
+    .select('kyc_status, credit_limit')
+    .eq('id', user.id)
     .maybeSingle()
 
-  if (recentApplication) {
-    throw new Error('Please wait a few minutes before submitting another application.')
+  if (borrowerError || !borrower) {
+    throw new Error('Borrower profile not found. Please complete registration first.')
   }
 
-  // Credit-exposure and eligibility checks now live entirely in
-  // evaluateLoanApplication (lib/underwriting.ts) as hard stops, so we
-  // don't duplicate them here — this avoids the two checks drifting out
-  // of sync with each other. This is also what actually enforces the
-  // available-credit denial for financing loans — the UI check on the
-  // apply form is just a friendly heads-up, not the source of truth.
+  const { data: existingLoans } = await supabase
+    .from('loans')
+    .select('status')
+    .eq('borrower_id', user.id)
 
-  // 1. RUN THE AUTOMATED UNDERWRITING ALGORITHM
-  const assessment = await evaluateLoanApplication(supabase, {
-    borrowerId: user.id,
-    principalAmount,
-    termDays,
-    purpose: effectivePurpose
+  const activeLoanCount = (existingLoans ?? []).filter(
+    l => ['active', 'disbursed'].includes(l.status)
+  ).length
+  const hasOverdueLoan = (existingLoans ?? []).some(l => l.status === 'overdue')
+
+  const { eligible, reason } = checkEligibility({
+    requestedAmount: principalAmount,
+    creditLimit: Number(borrower.credit_limit),
+    kycStatus: borrower.kyc_status,
+    activeLoanCount,
+    hasOverdueLoan,
   })
 
-  const processingFee = 150.00
-  const serviceFee = principalAmount * (assessment.serviceFeeRate / 100)
-  const interestAmount = principalAmount * (assessment.interestRate / 100) * (termDays / 365)
-  const totalRepayable = principalAmount + interestAmount + serviceFee + processingFee
+  if (isFinancing && eligible && principalAmount > Number(borrower.credit_limit)) {
+    throw new Error('This item exceeds your available credit.')
+  }
 
-  const dueDate = new Date()
-  dueDate.setDate(dueDate.getDate() + termDays)
-  const dueDateStr = dueDate.toISOString().split('T')[0]
+  const interestRate = 0.05
+  const serviceFeeRate = 0.02
+  const totalInterest = principalAmount * interestRate
+  const processingFee = principalAmount * serviceFeeRate
+  const totalRepayable = principalAmount + totalInterest + processingFee
 
-  const schedule = assessment.approved
-    ? generateInstallmentSchedule("", totalRepayable, termDays, numInstallments, new Date())
-    : []
+  const { data: loan, error: insertError } = await supabase
+    .from('loans')
+    .insert({
+      borrower_id: user.id,
+      principal_amount: principalAmount,
+      term_days: termDays,
+      interest_rate: interestRate,
+      service_fee_rate: serviceFeeRate,
+      processing_fee: processingFee,
+      total_interest: totalInterest,
+      total_repayable: totalRepayable,
+      status: eligible ? 'approved' : 'rejected',
+      approved_at: eligible ? new Date().toISOString() : null,
+      rejection_reason: eligible ? null : reason,
+      due_date: eligible
+        ? new Date(Date.now() + termDays * 86400000).toISOString().slice(0, 10)
+        : null,
+      payout_method: payoutMethod,
+      payout_account_name: payoutAccountName,
+      payout_account_number: payoutAccountNumber,
+      shipping_address_line: shippingAddressLine,
+      shipping_barangay: shippingBarangay,
+      shipping_city: shippingCity,
+      shipping_province: shippingProvince,
+      shipping_postal_code: shippingPostalCode,
+    })
+    .select('id')
+    .single()
 
-  const { data: loanId, error } = await supabase.rpc('create_loan_with_schedule_and_payout', {
-    p_borrower_id:      user.id,
-    p_principal:        principalAmount,
-    p_term_days:        termDays,
-    p_interest_rate:    assessment.interestRate,
-    p_service_fee_rate: assessment.serviceFeeRate,
-    p_processing_fee:   processingFee,
-    p_total_interest:   interestAmount,
-    p_total_repayable:  totalRepayable,
-    p_status:           assessment.status,
-    p_rejection_reason: assessment.rejectionReason ?? null,
-    p_approved_at:      assessment.approved ? new Date().toISOString() : null,
-    p_due_date:         assessment.approved ? dueDateStr : null,
-    p_installments:     schedule,
-    p_payout_method:         payoutMethod,
-    p_payout_account_name:   payoutAccountName,
-    p_payout_account_number: payoutAccountNumber,
+  if (insertError || !loan) {
+    throw new Error('Could not submit your loan application. Please try again.')
+  }
+
+  if (eligible) {
+    const { error: disburseError } = await supabase
+      .from('loans')
+      .update({ status: 'disbursed', disbursed_at: new Date().toISOString() })
+      .eq('id', loan.id)
+
+    if (disburseError) {
+      throw new Error('Loan approved but disbursement failed. Please contact support.')
+    }
+
+    await generateInstallmentSchedule(supabase, loan.id, totalRepayable, termDays, numInstallments)
+  }
+
+  redirect(`/loans/${loan.id}`)
+}
+
+async function generateInstallmentSchedule(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  loanId: string,
+  totalRepayable: number,
+  termDays: number,
+  numInstallments: number
+) {
+  const installmentAmount = Math.round((totalRepayable / numInstallments) * 100) / 100
+  const today = new Date()
+
+  const installments = Array.from({ length: numInstallments }, (_, i) => {
+    const dueDate = new Date(today)
+    dueDate.setDate(dueDate.getDate() + Math.round(((i + 1) * termDays) / numInstallments))
+
+    return {
+      loan_id: loanId,
+      installment_number: i + 1,
+      amount_due: installmentAmount,
+      amount_paid: 0,
+      due_date: dueDate.toISOString().slice(0, 10),
+      status: 'upcoming' as const,
+    }
   })
 
-  if (error) throw new Error('Failed to create loan: ' + error.message)
+  const { error } = await supabase.from('loan_installments').insert(installments)
 
-  redirect(`/dashboard?loan_status=${assessment.status}`)
+  if (error) {
+    throw new Error('Failed to generate installment schedule: ' + error.message)
+  }
 }
