@@ -2,6 +2,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import HeroStatement from '@/components/HeroStatement'
 
 function peso(n: number) {
   return `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -212,23 +213,33 @@ export default async function DashboardPage() {
 
         <main className="max-w-6xl mx-auto px-6 sm:px-10 py-10">
 
-          {/* Statement masthead */}
-          <div className="flex items-end justify-between flex-wrap gap-3 mb-1">
+          {/* ── Two-Column Hero Masthead Section ── */}
+          <section className="grid lg:grid-cols-[1.15fr_0.85fr] gap-12 items-center mb-10 pt-2">
             <div>
-              <p className="font-mono text-xs uppercase tracking-widest mb-1" style={{ color: 'var(--ink-4)' }}>
-                Account statement · {formatMonthYear(new Date())}
-              </p>
-              <h1 className="font-display text-3xl" style={{ color: 'var(--ink)', fontWeight: 500 }}>
+              <div className="flex items-center gap-3 flex-wrap mb-3">
+                <p className="font-mono text-xs uppercase tracking-widest" style={{ color: 'var(--ink-4)' }}>
+                  Account statement · {formatMonthYear(new Date())}
+                </p>
+                <span className="stamp" style={{ color: 'var(--ink-3)', borderColor: 'var(--line-md)' }}>
+                  Issued {formatDate(new Date().toISOString())}
+                </span>
+              </div>
+              
+              <h1 className="font-display text-4xl sm:text-5xl leading-tight mb-4" style={{ color: 'var(--ink)', fontWeight: 500 }}>
                 Welcome back, {firstName}.
               </h1>
+              
+              <p className="text-base leading-relaxed mb-6" style={{ color: 'var(--ink-3)', maxWidth: 480 }}>
+                {priorityAlert 
+                  ? "We flagged an item on your account that requires your attention below." 
+                  : "Everything is on track — your portfolio, payment schedule, and available credit are up to date."}
+              </p>
             </div>
-            <span className="stamp" style={{ color: 'var(--ink-3)', borderColor: 'var(--line-md)' }}>
-              Issued {formatDate(new Date().toISOString())}
-            </span>
-          </div>
-          <p className="text-sm mb-7" style={{ color: 'var(--ink-3)' }}>
-            {priorityAlert ? "Here's what needs your attention." : "Everything's on track — here's where things stand."}
-          </p>
+
+            <div className="flex justify-center lg:justify-end" style={{ transform: 'rotate(1.2deg)' }}>
+              <HeroStatement />
+            </div>
+          </section>
 
           {priorityAlert && (
             <div

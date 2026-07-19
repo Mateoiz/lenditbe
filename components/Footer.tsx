@@ -1,62 +1,127 @@
+// components/Footer.tsx
+import Link from 'next/link'
+
 export default function Footer() {
   return (
-    <footer style={{ borderTop: '1px solid rgba(0,0,0,0.08)', background: '#F7F6F3' }}>
-      <div className="max-w-6xl mx-auto px-6 py-14 grid sm:grid-cols-2 md:grid-cols-4 gap-10">
+    <footer style={{ background: '#F5F0E4', borderTop: '1.5px solid rgba(20,17,15,0.18)' }}>
+      <div className="max-w-6xl mx-auto px-6 sm:px-10 py-14 grid sm:grid-cols-2 md:grid-cols-4 gap-10">
+
+        {/* Brand column */}
         <div>
-          <div
-            className="text-xl mb-3"
-            style={{ fontFamily: "'DM Serif Display', Georgia, serif", color: '#141210' }}
-          >
-            Lendit<span style={{ color: '#2563EB', fontStyle: 'italic' }}>Be</span>
+          <div style={{
+            fontFamily: "'Fraunces', Georgia, serif",
+            fontSize: 20,
+            fontWeight: 600,
+            color: '#14110F',
+            marginBottom: 12,
+          }}>
+            Lendit
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 24,
+              height: 24,
+              borderRadius: '50%',
+              background: '#F5A623',
+              color: '#073F38',
+              fontSize: 11,
+              fontWeight: 700,
+              marginLeft: 3,
+              border: '1.5px solid #14110F',
+              verticalAlign: 'middle',
+            }}>Be</span>
           </div>
-          <p className="text-sm leading-relaxed" style={{ color: '#7A756D' }}>
+          <p style={{
+            fontFamily: "'Inter', -apple-system, sans-serif",
+            fontSize: 13,
+            lineHeight: 1.7,
+            color: '#6B655A',
+          }}>
             A complete lending platform for Philippine cooperatives, microfinance
             institutions, and private lenders.
           </p>
         </div>
 
-        <div>
-          <div className="text-xs font-mono uppercase tracking-widest mb-4" style={{ color: '#B8B2A8' }}>
-            Product
-          </div>
-          <ul className="flex flex-col gap-2 text-sm" style={{ color: '#3D3A35' }}>
-            <li><a href="#features">Features</a></li>
-            <li><a href="#how-it-works">How it works</a></li>
-            <li><a href="/products">Product financing</a></li>
-            <li><a href="#testimonials">Stories</a></li>
-          </ul>
-        </div>
+        {/* Product */}
+        <FooterCol label="Product" links={[
+          { href: '#features',     label: 'Features' },
+          { href: '#how-it-works', label: 'How it works' },
+          { href: '/products',     label: 'Product financing' },
+          { href: '#testimonials', label: 'Stories' },
+        ]} />
 
-        <div>
-          <div className="text-xs font-mono uppercase tracking-widest mb-4" style={{ color: '#B8B2A8' }}>
-            Company
-          </div>
-          <ul className="flex flex-col gap-2 text-sm" style={{ color: '#3D3A35' }}>
-            <li><a href="#about">About</a></li>
-            <li><a href="/register">Open an account</a></li>
-            <li><a href="/login">Sign in</a></li>
-          </ul>
-        </div>
+        {/* Company */}
+        <FooterCol label="Company" links={[
+          { href: '#about',    label: 'About' },
+          { href: '/register', label: 'Open an account' },
+          { href: '/login',    label: 'Sign in' },
+        ]} />
 
-        <div>
-          <div className="text-xs font-mono uppercase tracking-widest mb-4" style={{ color: '#B8B2A8' }}>
-            Legal
-          </div>
-          <ul className="flex flex-col gap-2 text-sm" style={{ color: '#3D3A35' }}>
-            <li><a href="/terms">Terms of service</a></li>
-            <li><a href="/privacy">Privacy policy</a></li>
-            <li><a href="/data-privacy">RA 10173 disclosure</a></li>
-          </ul>
-        </div>
+        {/* Legal */}
+        <FooterCol label="Legal" links={[
+          { href: '/terms',        label: 'Terms of service' },
+          { href: '/privacy',      label: 'Privacy policy' },
+          { href: '/data-privacy', label: 'RA 10173 disclosure' },
+        ]} />
       </div>
 
+      {/* Bottom bar */}
       <div
-        className="max-w-6xl mx-auto px-6 py-6 flex flex-col sm:flex-row justify-between items-center gap-3 text-xs font-mono"
-        style={{ borderTop: '1px solid rgba(0,0,0,0.08)', color: '#B8B2A8' }}
+        className="max-w-6xl mx-auto px-6 sm:px-10 py-5 flex flex-col sm:flex-row justify-between items-center gap-3"
+        style={{ borderTop: '1.5px solid rgba(20,17,15,0.18)' }}
       >
-        <span>© {new Date().getFullYear()} LenditBe. All rights reserved.</span>
-        <span>Made for Philippine lenders.</span>
+        <span style={{
+          fontFamily: "'Space Mono', monospace",
+          fontSize: 11,
+          color: '#9C9484',
+        }}>
+          © {new Date().getFullYear()} LenditBe. All rights reserved.
+        </span>
+        <span style={{
+          fontFamily: "'Space Mono', monospace",
+          fontSize: 11,
+          color: '#9C9484',
+        }}>
+          Made for Philippine lenders.
+        </span>
       </div>
     </footer>
+  )
+}
+
+function FooterCol({ label, links }: { label: string; links: { href: string; label: string }[] }) {
+  return (
+    <div>
+      <div style={{
+        fontFamily: "'Space Mono', monospace",
+        fontSize: 10,
+        fontWeight: 700,
+        textTransform: 'uppercase',
+        letterSpacing: '0.09em',
+        color: '#9C9484',
+        marginBottom: 14,
+      }}>
+        {label}
+      </div>
+      <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {links.map((l) => (
+          <li key={l.href}>
+            <Link
+              href={l.href}
+              className="transition-colors duration-150 hover:!text-[#0B5D52]"
+              style={{
+                fontFamily: "'Inter', -apple-system, sans-serif",
+                fontSize: 13,
+                color: '#3A362F',
+                textDecoration: 'none',
+              }}
+            >
+              {l.label}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
   )
 }
