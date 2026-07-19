@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 
 function peso(n: number) {
   return `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -30,6 +30,7 @@ export default function PaymentFlow({
   installmentNumber: number
   payAction: (formData: FormData) => Promise<void>
 }) {
+  const router = useRouter()
   const [stage, setStage] = useState<Stage>('form')
   const [isPending, startTransition] = useTransition()
   const [amount, setAmount] = useState(installmentDue.toFixed(2))
@@ -146,9 +147,16 @@ export default function PaymentFlow({
             </div>
           </div>
 
-          <Link href={`/loans/${loanId}`} className="btn-primary mt-6" style={{ textDecoration: 'none' }}>
+          <button
+            className="btn-primary mt-6"
+            style={{ textDecoration: 'none' }}
+            onClick={() => {
+              router.refresh()
+              router.push(`/loans/${loanId}`)
+            }}
+          >
             Done
-          </Link>
+          </button>
         </div>
 
         <style>{`

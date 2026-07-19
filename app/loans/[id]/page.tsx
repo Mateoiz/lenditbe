@@ -219,43 +219,141 @@ export default async function LoanDetailPage({ params }: { params: Promise<{ id:
             </div>
           </div>
 
-          {allInstallments.length > 0 && (
-            <div className="mb-8">
-              <p className="section-label">Payment schedule</p>
-              <div className="ledger-card overflow-hidden">
-                <div className="punch-line" />
-                {allInstallments.map(inst => {
-                  const im = INST_META[inst.status] ?? INST_META.upcoming
-                  return (
-                    <div key={inst.id} className="inst-row">
-                      <div className="dot" style={{ background: im.dot }} />
-                      <div style={{ flex: 1 }}>
-                        <p className="text-sm font-medium" style={{ color: 'var(--ink)' }}>
-                          Installment {inst.installment_number}
-                          <span className="font-mono text-xs ml-2" style={{ color: im.color }}>
-                            {im.label}
-                          </span>
+          {allInstallments.length > 0 && (() => {
+            // Split into "settled" (fully paid) vs "open" (still owed, in
+            // any order/amount — early or partial payments are still fine,
+            // this split is purely about what's left to reorganize the list
+            // around, not about restricting how installments get paid).
+            const openInstallments = allInstallments
+              .filter(i => Number(i.amount_paid) < Number(i.amount_due))
+              .sort((a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime())
+            const paidInstallments = allInstallments
+              .filter(i => Number(i.amount_paid) >= Number(i.amount_due))
+              .sort((a, b) => new Date(b.due_date).getTime() - new Date(a.due_date).getTime())
+
+            const nextDue = openInstallments[0] ?? null
+            const laterOpen = openInstallments.slice(1)
+
+            return (
+              <div className="mb-8">
+                <p className="section-label">Payment schedule</p>
+
+                {/* Next payment — pulled out and highlighted so it's the
+                    first thing anyone sees, instead of buried in a flat list */}
+                {nextDue && (
+                  <div
+                    className="ledger-card p-5 mb-4"
+                    style={{
+                      borderColor: nextDue.status === 'overdue' ? 'var(--magenta)' : 'var(--marigold)',
+                      background: nextDue.status === 'overdue' ? 'var(--magenta-bg)' : 'var(--marigold-bg)',
+                    }}
+                  >
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div>
+                        <p className="font-mono text-xs uppercase tracking-widest mb-1"
+                          style={{ color: nextDue.status === 'overdue' ? 'var(--magenta)' : 'var(--marigold-dark)' }}>
+                          Next payment · Installment {nextDue.installment_number}
                         </p>
-                        <p className="font-mono text-xs mt-0.5" style={{ color: 'var(--ink-4)' }}>
-                          Due {formatDate(inst.due_date)}
+                        <p className="font-display text-2xl" style={{ color: 'var(--ink)', fontWeight: 500 }}>
+                          {peso(Number(nextDue.amount_due) - Number(nextDue.amount_paid))}
+                        </p>
+                        <p className="font-mono text-xs mt-1" style={{ color: 'var(--ink-3)' }}>
+                          Due {formatDate(nextDue.due_date)}
+                          {Number(nextDue.amount_paid) > 0 && ` · ${peso(Number(nextDue.amount_paid))} already paid toward this`}
                         </p>
                       </div>
-                      <div className="text-right">
-                        <p className="font-mono text-sm font-medium" style={{ color: 'var(--ink)' }}>
-                          {peso(inst.amount_due)}
-                        </p>
-                        {inst.amount_paid > 0 && (
-                          <p className="font-mono text-xs" style={{ color: 'var(--teal-dark)' }}>
-                            Paid {peso(inst.amount_paid)}
-                          </p>
-                        )}
-                      </div>
+                      {canPay && (
+                        <Link href={`/loans/${loan.id}/pay`} className="btn-primary">
+                          Pay now
+                        </Link>
+                      )}
                     </div>
-                  )
-                })}
+                  </div>
+                )}
+
+                {/* Remaining upcoming installments — grouped together,
+                    ordered by due date, kept visually secondary to the
+                    highlighted next payment above */}
+                {laterOpen.length > 0 && (
+                  <div className="mb-4">
+                    <p className="font-mono text-xs uppercase tracking-widest mb-2" style={{ color: 'var(--ink-4)' }}>
+                      Upcoming ({laterOpen.length})
+                    </p>
+                    <div className="ledger-card overflow-hidden">
+                      <div className="punch-line" />
+                      {laterOpen.map(inst => {
+                        const im = INST_META[inst.status] ?? INST_META.upcoming
+                        return (
+                          <div key={inst.id} className="inst-row">
+                            <div className="dot" style={{ background: im.dot }} />
+                            <div style={{ flex: 1 }}>
+                              <p className="text-sm font-medium" style={{ color: 'var(--ink)' }}>
+                                Installment {inst.installment_number}
+                                <span className="font-mono text-xs ml-2" style={{ color: im.color }}>
+                                  {im.label}
+                                </span>
+                              </p>
+                              <p className="font-mono text-xs mt-0.5" style={{ color: 'var(--ink-4)' }}>
+                                Due {formatDate(inst.due_date)}
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <p className="font-mono text-sm font-medium" style={{ color: 'var(--ink)' }}>
+                                {peso(Number(inst.amount_due) - Number(inst.amount_paid))}
+                              </p>
+                              {Number(inst.amount_paid) > 0 && (
+                                <p className="font-mono text-xs" style={{ color: 'var(--teal-dark)' }}>
+                                  {peso(Number(inst.amount_paid))} paid
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Fully paid installments — collapsed into their own
+                    section at the bottom so they don't compete for
+                    attention with what's still owed */}
+                {paidInstallments.length > 0 && (
+                  <details>
+                    <summary
+                      className="font-mono text-xs uppercase tracking-widest mb-2 cursor-pointer select-none"
+                      style={{ color: 'var(--ink-4)' }}
+                    >
+                      Paid ({paidInstallments.length})
+                    </summary>
+                    <div className="ledger-card overflow-hidden mt-2">
+                      <div className="punch-line" />
+                      {paidInstallments.map(inst => (
+                        <div key={inst.id} className="inst-row">
+                          <div className="dot" style={{ background: 'var(--teal)' }} />
+                          <div style={{ flex: 1 }}>
+                            <p className="text-sm font-medium" style={{ color: 'var(--ink)' }}>
+                              Installment {inst.installment_number}
+                              <span className="font-mono text-xs ml-2" style={{ color: 'var(--teal-dark)' }}>
+                                Paid
+                              </span>
+                            </p>
+                            <p className="font-mono text-xs mt-0.5" style={{ color: 'var(--ink-4)' }}>
+                              Due {formatDate(inst.due_date)}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="font-mono text-sm font-medium" style={{ color: 'var(--ink)' }}>
+                              {peso(Number(inst.amount_paid))}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
               </div>
-            </div>
-          )}
+            )
+          })()}
 
           {allPayments.length > 0 && (
             <div>

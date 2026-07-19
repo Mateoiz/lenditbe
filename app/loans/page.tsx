@@ -189,7 +189,7 @@ export default async function LoansPage({
             <h1 className="font-display text-3xl" style={{ color: 'var(--ink)', fontWeight: 500 }}>
               Your loans
             </h1>
-            <Link href="/apply" className="btn-primary">
+            <Link href="/loans/apply" className="btn-primary">
               Apply for a loan
             </Link>
           </div>
@@ -245,17 +245,17 @@ export default async function LoansPage({
                     Next payment due
                   </p>
                   {soonestDue ? (
-                    <p className="font-display text-lg" style={{ color: 'var(--ink)', fontWeight: 500 }}>
-                      {peso(Number(soonestDue.amount_due) - Number(soonestDue.amount_paid))}
-                      <span className="font-mono text-xs ml-2" style={{ color: 'var(--ink-3)' }}>
-                        due {formatDate(soonestDue.due_date)}
-                      </span>
-                    </p>
-                  ) : (
-                    <p className="font-display text-lg" style={{ color: 'var(--ink-4)', fontWeight: 500 }}>
-                      Nothing scheduled
-                    </p>
-                  )}
+  <p className="font-display text-lg" style={{ color: 'var(--ink)', fontWeight: 500 }}>
+    {peso(Math.max(0, Number(soonestDue.amount_due) - Number(soonestDue.amount_paid)))}
+    <span className="font-mono text-xs ml-2" style={{ color: 'var(--ink-3)' }}>
+      due {formatDate(soonestDue.due_date)}
+    </span>
+  </p>
+) : (
+  <p className="font-display text-lg" style={{ color: 'var(--ink-4)', fontWeight: 500 }}>
+    Nothing scheduled
+  </p>
+)}
                 </div>
               </div>
 

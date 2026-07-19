@@ -1,10 +1,28 @@
 // src/lib/installments.ts
-type InstallmentInsert = {
+// Plain shared module — NOT a server action file. Both the client apply
+// page and the server action import from here, so the valid-count logic
+// only lives in one place.
+
+export const MIN_INSTALLMENT_INTERVAL_DAYS = 7
+
+export type InstallmentInsert = {
   loan_id: string
   installment_number: number
   due_date: string
   amount_due: number
   status: 'upcoming'
+}
+
+// Given a term length, what installment counts actually make sense.
+// Used to validate the borrower's choice server-side and to build the
+// options list shown on the form.
+export function getValidInstallmentCounts(termDays: number): number[] {
+  const maxCount = Math.max(1, Math.floor(termDays / MIN_INSTALLMENT_INTERVAL_DAYS))
+  const counts: number[] = []
+  for (let n = 1; n <= Math.min(maxCount, 6); n++) {
+    counts.push(n)
+  }
+  return counts
 }
 
 export function generateInstallmentSchedule(

@@ -2,8 +2,9 @@
 'use client'
 
 import Link from 'next/link'
-import { useState, useTransition } from 'react'
+import { useMemo, useState, useTransition } from 'react'
 import { submitLoanApplication } from './actions'
+import { getValidInstallmentCounts, MIN_INSTALLMENT_INTERVAL_DAYS } from '@/lib/installments'
 
 const TERM_OPTIONS = [
   { days: 15, label: '15 days' },
@@ -24,6 +25,21 @@ const PURPOSE_OPTIONS = [
 export default function LoanApplyPage() {
   const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
+  const [termDays, setTermDays] = useState<number | ''>('')
+  const [numInstallments, setNumInstallments] = useState<number | ''>('')
+
+  const validCounts = useMemo(
+    () => (termDays ? getValidInstallmentCounts(Number(termDays)) : []),
+    [termDays]
+  )
+
+  function handleTermChange(value: string) {
+    const days = value ? parseInt(value, 10) : ''
+    setTermDays(days)
+    // Reset installment choice whenever the term changes, since a count
+    // valid for one term can be invalid for another.
+    setNumInstallments('')
+  }
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -91,6 +107,7 @@ export default function LoanApplyPage() {
           outline: none;
           border-color: var(--teal);
         }
+        .field-input:disabled { opacity: 0.5; cursor: not-allowed; }
         .field-input::placeholder { color: var(--ink-4); }
 
         select.field-input {
@@ -99,6 +116,20 @@ export default function LoanApplyPage() {
           background-position: right 14px center;
           padding-right: 38px;
           cursor: pointer;
+        }
+
+        .installment-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 8px; }
+        .installment-option input { display: none; }
+        .installment-label {
+          display: flex; flex-direction: column; align-items: center; gap: 2px;
+          padding: 12px 8px; border-radius: 4px; cursor: pointer;
+          border: 1.5px solid var(--line-md); background: var(--paper);
+          font-size: 13px; font-weight: 600; color: var(--ink-2);
+          transition: all 0.15s ease; text-align: center; user-select: none;
+        }
+        .installment-label:hover { border-color: var(--teal); background: var(--teal-bg); }
+        .installment-option input:checked + .installment-label {
+          border-color: var(--teal); background: var(--teal-bg); color: var(--teal-dark);
         }
       `}</style>
 
@@ -164,13 +195,59 @@ export default function LoanApplyPage() {
               <span className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>
                 Loan term
               </span>
-              <select name="term_days" required className="field-input" defaultValue="">
+              <select
+                name="term_days"
+                required
+                className="field-input"
+                value={termDays}
+                onChange={(e) => handleTermChange(e.target.value)}
+              >
                 <option value="" disabled>Select a term</option>
                 {TERM_OPTIONS.map(t => (
                   <option key={t.days} value={t.days}>{t.label}</option>
                 ))}
               </select>
             </label>
+
+            <div className="flex flex-col gap-2">
+              <span className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>
+                Number of installments
+              </span>
+              {termDays ? (
+                <>
+                  <div className="installment-grid">
+                    {validCounts.map(n => (
+                      <label key={n} className="installment-option">
+                        <input
+                          type="radio"
+                          name="num_installments"
+                          value={n}
+                          checked={numInstallments === n}
+                          onChange={() => setNumInstallments(n)}
+                          required
+                        />
+                        <span className="installment-label">
+                          <span className="font-display text-lg">{n}</span>
+                          <span className="font-mono" style={{ fontSize: 10, color: 'var(--ink-4)' }}>
+                            {n === 1 ? 'lump sum' : `every ${Math.round(Number(termDays) / n)}d`}
+                          </span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                  <span className="text-xs font-mono" style={{ color: 'var(--ink-4)' }}>
+                    Installments are spaced at least {MIN_INSTALLMENT_INTERVAL_DAYS} days apart. Paying early is always allowed.
+                  </span>
+                </>
+              ) : (
+                <div
+                  className="field-input"
+                  style={{ color: 'var(--ink-4)', cursor: 'not-allowed', background: 'var(--paper-2)' }}
+                >
+                  Select a loan term first
+                </div>
+              )}
+            </div>
 
             <label className="flex flex-col gap-2">
               <span className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>
