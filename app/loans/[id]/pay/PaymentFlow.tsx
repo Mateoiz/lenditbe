@@ -50,8 +50,6 @@ export default function PaymentFlow({
     formData.set('amount', amount)
     formData.set('channel', channel)
 
-    // Small artificial delay so the loading state is visible / feels real,
-    // then run the actual server action.
     startTransition(async () => {
       try {
         await new Promise((resolve) => setTimeout(resolve, 1400))
@@ -75,17 +73,17 @@ export default function PaymentFlow({
   // ── LOADING ──
   if (stage === 'loading') {
     return (
-      <div className="card p-10 flex flex-col items-center text-center" style={{ gap: 16 }}>
+      <div className="ledger-card p-10 flex flex-col items-center text-center" style={{ gap: 16 }}>
         <div className="pay-spinner" />
         <p className="font-semibold" style={{ color: 'var(--ink)' }}>Processing your payment…</p>
-        <p className="text-sm" style={{ color: 'var(--ink-3)' }}>
+        <p className="font-mono text-xs" style={{ color: 'var(--ink-3)' }}>
           Confirming {peso(Number(amount))} via {channelMeta.label}
         </p>
         <style>{`
           .pay-spinner {
-            width: 52px; height: 52px; border-radius: 50%;
-            border: 4px solid var(--blue-bg);
-            border-top-color: var(--blue-mid);
+            width: 48px; height: 48px; border-radius: 50%;
+            border: 4px solid var(--teal-bg);
+            border-top-color: var(--teal);
             animation: pay-spin 0.8s linear infinite;
           }
           @keyframes pay-spin { to { transform: rotate(360deg); } }
@@ -97,58 +95,68 @@ export default function PaymentFlow({
   // ── SUCCESS / RECEIPT ──
   if (stage === 'success') {
     return (
-      <div className="card p-8 flex flex-col items-center text-center receipt-in" style={{ gap: 4 }}>
-        <div className="check-circle">
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none">
-            <path
-              className="check-path"
-              d="M5 13l4 4L19 7"
-              stroke="#fff"
-              strokeWidth="3"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
+      <div className="ledger-card overflow-hidden receipt-in">
+        <div className="punch-line" />
+        <div className="p-8 flex flex-col items-center text-center" style={{ gap: 4 }}>
+          <div className="check-circle">
+            <svg width="30" height="30" viewBox="0 0 24 24" fill="none">
+              <path
+                className="check-path"
+                d="M5 13l4 4L19 7"
+                stroke="#fff"
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </div>
+
+          <p className="font-display text-2xl mt-4" style={{ color: 'var(--ink)', fontWeight: 500 }}>
+            Payment received
+          </p>
+          <p className="font-display text-4xl mt-1 mb-1" style={{ color: 'var(--teal-dark)', fontWeight: 500 }}>
+            {peso(Number(amount))}
+          </p>
+          <p className="font-mono text-xs mb-6" style={{ color: 'var(--ink-4)' }}>
+            {paidAt?.toLocaleString('en-PH', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}
+          </p>
+
+          <div className="w-full" style={{ borderTop: '1.5px dashed var(--line-md)', paddingTop: 4 }}>
+            <div className="summary-row">
+              <span style={{ color: 'var(--ink-3)' }}>Payment method</span>
+              <span className="font-mono font-semibold" style={{ color: 'var(--ink)' }}>
+                {channelMeta.icon} {channelMeta.label}
+              </span>
+            </div>
+            <div className="summary-row">
+              <span style={{ color: 'var(--ink-3)' }}>Installment</span>
+              <span className="font-mono font-semibold" style={{ color: 'var(--ink)' }}>
+                #{installmentNumber}
+              </span>
+            </div>
+            <div className="summary-row">
+              <span style={{ color: 'var(--ink-3)' }}>Reference no.</span>
+              <span className="font-mono" style={{ color: 'var(--ink)' }}>{receiptRef}</span>
+            </div>
+            <div className="summary-row">
+              <span style={{ color: 'var(--ink-3)' }}>Status</span>
+              <span className="stamp" style={{ color: 'var(--teal-dark)', borderColor: 'var(--teal)' }}>
+                Paid
+              </span>
+            </div>
+          </div>
+
+          <Link href={`/loans/${loanId}`} className="btn-primary mt-6" style={{ textDecoration: 'none' }}>
+            Done
+          </Link>
         </div>
-
-        <h2 className="font-serif text-2xl mt-4" style={{ fontFamily: "'DM Serif Display',Georgia,serif", color: 'var(--ink)' }}>
-          Payment Successful
-        </h2>
-        <p className="font-serif text-4xl mt-1 mb-1" style={{ fontFamily: "'DM Serif Display',Georgia,serif", color: 'var(--green)' }}>
-          {peso(Number(amount))}
-        </p>
-        <p className="text-xs font-mono mb-6" style={{ color: 'var(--ink-4)' }}>
-          {paidAt?.toLocaleString('en-PH', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}
-        </p>
-
-        <div className="w-full" style={{ borderTop: '1px dashed var(--line-md)', paddingTop: 16 }}>
-          <div className="receipt-row">
-            <span>Payment method</span>
-            <span style={{ fontWeight: 600 }}>{channelMeta.icon} {channelMeta.label}</span>
-          </div>
-          <div className="receipt-row">
-            <span>Installment</span>
-            <span style={{ fontWeight: 600 }}>#{installmentNumber}</span>
-          </div>
-          <div className="receipt-row">
-            <span>Reference no.</span>
-            <span className="font-mono">{receiptRef}</span>
-          </div>
-          <div className="receipt-row">
-            <span>Status</span>
-            <span style={{ color: 'var(--green)', fontWeight: 600 }}>Paid</span>
-          </div>
-        </div>
-
-        <Link href={`/loans/${loanId}`} className="submit-btn mt-6" style={{ textDecoration: 'none', display: 'block' }}>
-          Done
-        </Link>
 
         <style>{`
           .check-circle {
-            width: 64px; height: 64px; border-radius: 50%;
-            background: var(--green);
+            width: 60px; height: 60px; border-radius: 50%;
+            background: var(--teal);
             display: flex; align-items: center; justify-content: center;
+            border: 1.5px solid var(--ink);
             animation: check-pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
           }
           @keyframes check-pop {
@@ -166,10 +174,6 @@ export default function PaymentFlow({
             from { opacity: 0; transform: translateY(6px); }
             to { opacity: 1; transform: translateY(0); }
           }
-          .receipt-row {
-            display: flex; justify-content: space-between; align-items: center;
-            padding: 8px 0; font-size: 13px; color: var(--ink-3);
-          }
         `}</style>
       </div>
     )
@@ -177,7 +181,7 @@ export default function PaymentFlow({
 
   // ── FORM ──
   return (
-    <form onSubmit={handleSubmit} className="card p-6" style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+    <form onSubmit={handleSubmit} className="ledger-card p-6" style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
       {/* Amount */}
       <div>
         <label className="field-label">Payment amount</label>
@@ -199,7 +203,7 @@ export default function PaymentFlow({
           <button
             type="button"
             className="quick-fill-btn"
-            style={{ color: 'var(--blue-mid)', borderColor: 'var(--blue-bdr)', background: 'var(--blue-bg)' }}
+            style={{ color: 'var(--teal-dark)', borderColor: 'var(--teal-bdr)', background: 'var(--teal-bg)' }}
             onClick={() => setAmount(installmentDue.toFixed(2))}
           >
             Pay installment ({peso(installmentDue)})
@@ -207,7 +211,7 @@ export default function PaymentFlow({
           <button
             type="button"
             className="quick-fill-btn"
-            style={{ color: 'var(--green)', borderColor: 'var(--green-bdr)', background: 'var(--green-bg)' }}
+            style={{ color: 'var(--marigold-dark)', borderColor: 'var(--marigold-bdr)', background: 'var(--marigold-bg)' }}
             onClick={() => setAmount(outstanding.toFixed(2))}
           >
             Pay in full ({peso(outstanding)})
@@ -240,18 +244,18 @@ export default function PaymentFlow({
       {error && (
         <div
           role="alert"
-          className="text-sm px-4 py-3 rounded-lg"
-          style={{ background: 'var(--red-bg)', border: '1px solid var(--red-bdr)', color: 'var(--red)' }}
+          className="text-sm px-4 py-3"
+          style={{ background: 'var(--magenta-bg)', border: '1.5px solid var(--magenta-bdr)', color: 'var(--magenta)', borderRadius: 4 }}
         >
           {error}
         </div>
       )}
 
       <div>
-        <button type="submit" className="submit-btn" disabled={isPending}>
-          Confirm payment
+        <button type="submit" className="btn-primary" disabled={isPending}>
+          {isPending ? 'Processing…' : 'Confirm payment'}
         </button>
-        <p className="text-xs text-center mt-3" style={{ color: 'var(--ink-4)' }}>
+        <p className="font-mono text-xs text-center mt-3" style={{ color: 'var(--ink-4)' }}>
           Payment is recorded instantly and applied to your schedule.
         </p>
       </div>

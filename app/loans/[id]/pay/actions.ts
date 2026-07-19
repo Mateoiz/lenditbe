@@ -15,7 +15,7 @@ export async function submitPayment(
 
   const amount    = parseFloat(formData.get('amount') as string)
   const channel   = formData.get('channel') as string
-  // Reference number field removed from UI for mockup simplicity —
+  // Reference number field removed from UI for mockup simplicity 
   // auto-generate a placeholder so the column still has a value.
   const reference = `MOCK-${Date.now().toString(36).toUpperCase()}`
 
