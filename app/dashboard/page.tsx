@@ -240,9 +240,9 @@ export default async function DashboardPage() {
         <header className="flex items-center justify-between px-6 sm:px-10 py-5" style={{ borderBottom: '2px solid var(--ink)', background: 'var(--paper)' }}>
           <Link href="/" className="font-display text-2xl" style={{ color: 'var(--ink)', fontWeight: 600 }}>
             Lendit
-<span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30,
-  borderRadius: '50%', background: 'var(--marigold)', color: 'var(--teal-dark)', fontSize: 15, fontWeight: 700,
-  marginLeft: 2, border: '1.5px solid var(--ink)', verticalAlign: 'middle' }}>Be</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30,
+              borderRadius: '50%', background: 'var(--marigold)', color: 'var(--teal-dark)', fontSize: 15, fontWeight: 700,
+              marginLeft: 2, border: '1.5px solid var(--ink)', verticalAlign: 'middle' }}>Be</span>
           </Link>
           <div className="flex items-center gap-3">
             {isStudent && (
@@ -310,6 +310,20 @@ export default async function DashboardPage() {
                 <span>Total Repaid: <strong style={{ color: 'var(--ink)' }}>{repaymentPct}%</strong></span>
               )}
             </div>
+
+            {kycStatus === 'verified' && availableCredit > 0 && (
+              <div
+                className="flex items-center justify-between gap-3 flex-wrap mt-5 pt-5"
+                style={{ borderTop: '1px dashed var(--line-md)' }}
+              >
+                <p className="text-sm" style={{ color: 'var(--ink-3)' }}>
+                  Use your available credit on gadgets, appliances, and more from partner merchants.
+                </p>
+                <Link href="/products" className="btn-secondary flex-shrink-0" style={{ fontSize: 13, padding: '10px 18px' }}>
+                  Browse products →
+                </Link>
+              </div>
+            )}
           </div>
 
           {/* ── Priority Action Section ── */}
@@ -621,6 +635,23 @@ export default async function DashboardPage() {
                       <div>
                         <span className="sidebar-nav-label">Payments</span>
                         <span className="sidebar-nav-sub">All transactions</span>
+                      </div>
+                    </div>
+                    <span style={{ color: 'var(--ink-4)' }}>→</span>
+                  </Link>
+
+                  <Link href="/products" className="sidebar-nav-item">
+                    <div className="flex items-center gap-3">
+                      <span className="sidebar-nav-icon">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z" />
+                          <path d="M3 6h18" />
+                          <path d="M16 10a4 4 0 0 1-8 0" />
+                        </svg>
+                      </span>
+                      <div>
+                        <span className="sidebar-nav-label">Shop & finance</span>
+                        <span className="sidebar-nav-sub">{pesoShort(availableCredit)} available</span>
                       </div>
                     </div>
                     <span style={{ color: 'var(--ink-4)' }}>→</span>

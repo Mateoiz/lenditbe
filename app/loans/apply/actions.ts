@@ -49,6 +49,13 @@ export async function submitLoanApplication(formData: FormData) {
 
   if (!user) throw new Error('Not authenticated')
 
+  // ── FINANCING TYPE ──
+  // 'item' = product financing via available credit, no cash disbursed.
+  // 'cash' (default) = original loan-to-borrower flow, unchanged below.
+  const financingType = formData.get('financing_type') as string | null
+  const isFinancing = financingType === 'item'
+  const itemName = (formData.get('item_name') as string)?.trim() || null
+
   const parsed = LoanApplicationSchema.safeParse({
     principal_amount: parseFloat(formData.get('principal_amount') as string),
     term_days:        parseInt(formData.get('term_days') as string, 10),
@@ -59,6 +66,10 @@ export async function submitLoanApplication(formData: FormData) {
   }
   const { principal_amount: principalAmount, term_days: termDays, purpose } = parsed.data
 
+  // Fold the item name into purpose since there's no dedicated column yet —
+  // keeps this traceable in the underwriting rejection reason / loan record.
+  const effectivePurpose = isFinancing && itemName ? `Item financing: ${itemName}` : purpose
+
   const numInstallments = parseInt(formData.get('num_installments') as string, 10)
   const validCounts = getValidInstallmentCounts(termDays)
   if (!Number.isInteger(numInstallments) || !validCounts.includes(numInstallments)) {
@@ -66,38 +77,43 @@ export async function submitLoanApplication(formData: FormData) {
   }
 
   // ── PAYOUT DESTINATION ──
-  // Defaults to the borrower's saved disbursement details. The form may
-  // submit an override (use_custom_payout=1) with its own method/name/number.
-  const { data: borrower } = await supabase
-    .from('borrowers')
-    .select('disbursement_method, disbursement_account_name, disbursement_account_number')
-    .eq('id', user.id)
-    .maybeSingle()
+  // Financing loans never disburse cash to the borrower — the amount is
+  // drawn against their available credit for a merchant item — so there's
+  // nothing to collect here at all.
+  let payoutMethod: string | null = null
+  let payoutAccountName: string | null = null
+  let payoutAccountNumber: string | null = null
 
-  const useCustomPayout = formData.get('use_custom_payout') === '1'
+  if (!isFinancing) {
+    // Defaults to the borrower's saved disbursement details. The form may
+    // submit an override (use_custom_payout=1) with its own method/name/number.
+    const { data: borrower } = await supabase
+      .from('borrowers')
+      .select('disbursement_method, disbursement_account_name, disbursement_account_number')
+      .eq('id', user.id)
+      .maybeSingle()
 
-  let payoutMethod: string | null
-  let payoutAccountName: string | null
-  let payoutAccountNumber: string | null
+    const useCustomPayout = formData.get('use_custom_payout') === '1'
 
-  if (useCustomPayout) {
-    payoutMethod = formData.get('payout_method') as string
-    payoutAccountName = (formData.get('payout_account_name') as string)?.trim()
-    payoutAccountNumber = (formData.get('payout_account_number') as string)?.trim()
+    if (useCustomPayout) {
+      payoutMethod = formData.get('payout_method') as string
+      payoutAccountName = (formData.get('payout_account_name') as string)?.trim()
+      payoutAccountNumber = (formData.get('payout_account_number') as string)?.trim()
 
-    if (!payoutMethod || !PAYOUT_METHODS.includes(payoutMethod as any)) {
-      throw new Error('Please select a valid payout method.')
-    }
-    if (!payoutAccountName || !payoutAccountNumber) {
-      throw new Error('Please provide the payout account name and number.')
-    }
-  } else {
-    payoutMethod = borrower?.disbursement_method ?? null
-    payoutAccountName = borrower?.disbursement_account_name ?? null
-    payoutAccountNumber = borrower?.disbursement_account_number ?? null
+      if (!payoutMethod || !PAYOUT_METHODS.includes(payoutMethod as any)) {
+        throw new Error('Please select a valid payout method.')
+      }
+      if (!payoutAccountName || !payoutAccountNumber) {
+        throw new Error('Please provide the payout account name and number.')
+      }
+    } else {
+      payoutMethod = borrower?.disbursement_method ?? null
+      payoutAccountName = borrower?.disbursement_account_name ?? null
+      payoutAccountNumber = borrower?.disbursement_account_number ?? null
 
-    if (!payoutMethod || !payoutAccountName || !payoutAccountNumber) {
-      throw new Error('Please add your payout details to your profile, or provide them below, before applying.')
+      if (!payoutMethod || !payoutAccountName || !payoutAccountNumber) {
+        throw new Error('Please add your payout details to your profile, or provide them below, before applying.')
+      }
     }
   }
 
@@ -119,14 +135,16 @@ export async function submitLoanApplication(formData: FormData) {
   // Credit-exposure and eligibility checks now live entirely in
   // evaluateLoanApplication (lib/underwriting.ts) as hard stops, so we
   // don't duplicate them here — this avoids the two checks drifting out
-  // of sync with each other.
+  // of sync with each other. This is also what actually enforces the
+  // available-credit denial for financing loans — the UI check on the
+  // apply form is just a friendly heads-up, not the source of truth.
 
   // 1. RUN THE AUTOMATED UNDERWRITING ALGORITHM
   const assessment = await evaluateLoanApplication(supabase, {
     borrowerId: user.id,
     principalAmount,
     termDays,
-    purpose
+    purpose: effectivePurpose
   })
 
   const processingFee = 150.00

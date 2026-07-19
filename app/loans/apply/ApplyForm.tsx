@@ -2,6 +2,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { useMemo, useState, useTransition } from 'react'
 import { submitLoanApplication } from './actions'
 import { getValidInstallmentCounts, MIN_INSTALLMENT_INTERVAL_DAYS } from '@/lib/installments'
@@ -39,16 +40,27 @@ type SavedPayout = {
   accountNumber: string | null
 }
 
-export default function ApplyForm({ savedPayout }: { savedPayout: SavedPayout }) {
+export default function ApplyForm({ savedPayout, availableCredit }: { savedPayout: SavedPayout; availableCredit: number }) {
+  const searchParams = useSearchParams()
+  const isFinancing = searchParams.get('financing') === '1'
+  const itemName = searchParams.get('item')
+  const prefillAmount = searchParams.get('amount')
+  const prefillPurpose = searchParams.get('purpose')
+  const prefillTermDays = searchParams.get('term_days')
+  const prefillInstallments = searchParams.get('num_installments')
+  const isPrefilled = !!(prefillAmount && prefillTermDays)
+
   const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
-  const [termDays, setTermDays] = useState<number | ''>('')
-  const [numInstallments, setNumInstallments] = useState<number | ''>('')
+  const [termDays, setTermDays] = useState<number | ''>(prefillTermDays ? Number(prefillTermDays) : '')
+  const [numInstallments, setNumInstallments] = useState<number | ''>(prefillInstallments ? Number(prefillInstallments) : '')
+  const [principalAmount, setPrincipalAmount] = useState<number | ''>(prefillAmount ? Number(prefillAmount) : '')
 
-  const hasSavedPayout = !!(savedPayout.method && savedPayout.accountName && savedPayout.accountNumber)
-  // If there's nothing saved on the profile, the override fields are the
-  // only way to supply a destination, so open them by default.
-  const [useCustomPayout, setUseCustomPayout] = useState(!hasSavedPayout)
+  const exceedsCredit = isFinancing && typeof principalAmount === 'number' && principalAmount > availableCredit
+
+  // payout is irrelevant for financing — money never touches the borrower
+  const hasSavedPayout = !isFinancing && !!(savedPayout.method && savedPayout.accountName && savedPayout.accountNumber)
+  const [useCustomPayout, setUseCustomPayout] = useState(!hasSavedPayout && !isFinancing)
 
   const validCounts = useMemo(
     () => (termDays ? getValidInstallmentCounts(Number(termDays)) : []),
@@ -203,6 +215,43 @@ export default function ApplyForm({ savedPayout }: { savedPayout: SavedPayout })
             Fill out the details below. Your application is evaluated instantly.
           </p>
 
+          {/* ── Financing Mode Credit Summary ── */}
+          {isFinancing && (
+            <div
+              className="mb-6 p-4 rounded-lg flex items-center justify-between gap-4 flex-wrap"
+              style={{
+                background: exceedsCredit ? 'var(--magenta-bg)' : 'var(--teal-bg)',
+                border: `1.5px solid ${exceedsCredit ? 'var(--magenta-bdr)' : 'var(--teal-bdr)'}`,
+              }}
+            >
+              <div>
+                <div className="text-sm font-semibold" style={{ color: exceedsCredit ? 'var(--magenta)' : 'var(--teal-dark)' }}>
+                  Financing: {itemName}
+                </div>
+                <div className="font-mono text-xs mt-1" style={{ color: 'var(--ink-3)' }}>
+                  Available credit: ₱{availableCredit.toLocaleString()}
+                </div>
+              </div>
+              {exceedsCredit && (
+                <div className="text-xs font-semibold" style={{ color: 'var(--magenta)' }}>
+                  This item exceeds your available credit by ₱{((principalAmount as number) - availableCredit).toLocaleString()}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Standard Prefill Summary (only shown if NOT in financing mode) ── */}
+          {!isFinancing && isPrefilled && (
+            <div className="payout-summary mb-6" style={{ background: 'var(--marigold-bg)', border: '1.5px solid var(--marigold-bdr)' }}>
+              <div>
+                <div className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>Financing: {prefillPurpose}</div>
+                <div className="font-mono text-xs" style={{ color: 'var(--ink-3)' }}>
+                  ₱{Number(prefillAmount).toLocaleString()} · {prefillTermDays} days · {prefillInstallments} installments
+                </div>
+              </div>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="ledger-card p-6 sm:p-8 flex flex-col gap-6">
             <label className="flex flex-col gap-2">
               <span className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>
@@ -215,8 +264,12 @@ export default function ApplyForm({ savedPayout }: { savedPayout: SavedPayout })
                 max={50000}
                 step={100}
                 required
+                readOnly={isFinancing}
+                value={principalAmount}
+                onChange={(e) => setPrincipalAmount(e.target.value ? Number(e.target.value) : '')}
                 placeholder="e.g. 5000"
                 className="field-input"
+                style={isFinancing ? { background: 'var(--paper-2)', cursor: 'not-allowed' } : undefined}
               />
               <span className="text-xs font-mono" style={{ color: 'var(--ink-4)' }}>
                 Min ₱1,000 · Max ₱50,000
@@ -285,93 +338,103 @@ export default function ApplyForm({ savedPayout }: { savedPayout: SavedPayout })
               <span className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>
                 Purpose of loan
               </span>
-              <select name="purpose" required className="field-input" defaultValue="">
+              <select name="purpose" required className="field-input" defaultValue={prefillPurpose ?? ''}>
                 <option value="" disabled>Select a purpose</option>
+                {prefillPurpose && !PURPOSE_OPTIONS.includes(prefillPurpose) && (
+                  <option value={prefillPurpose}>{prefillPurpose}</option>
+                )}
                 {PURPOSE_OPTIONS.map(p => (
                   <option key={p} value={p}>{p}</option>
                 ))}
               </select>
             </label>
 
-            {/* ── Disbursement / payout destination ── */}
-            <div className="flex flex-col gap-2">
-              <span className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>
-                Send my loan to
-              </span>
+            {/* ── Disbursement / payout destination (hidden in financing mode) ── */}
+            {isFinancing ? (
+              <>
+                <input type="hidden" name="financing_type" value="item" />
+                {itemName && <input type="hidden" name="item_name" value={itemName} />}
+              </>
+            ) : (
+              <div className="flex flex-col gap-2">
+                <span className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>
+                  Send my loan to
+                </span>
 
-              {!useCustomPayout && hasSavedPayout && (
-                <>
-                  <div className="payout-summary">
-                    <div>
-                      <div className="text-sm" style={{ color: 'var(--teal-dark)', fontWeight: 600 }}>
-                        {payoutLabel(savedPayout.method)} · {savedPayout.accountName}
+                {!useCustomPayout && hasSavedPayout && (
+                  <>
+                    <div className="payout-summary">
+                      <div>
+                        <div className="text-sm" style={{ color: 'var(--teal-dark)', fontWeight: 600 }}>
+                          {payoutLabel(savedPayout.method)} · {savedPayout.accountName}
+                        </div>
+                        <div className="font-mono text-xs" style={{ color: 'var(--teal)' }}>
+                          {savedPayout.accountNumber}
+                        </div>
                       </div>
-                      <div className="font-mono text-xs" style={{ color: 'var(--teal)' }}>
-                        {savedPayout.accountNumber}
-                      </div>
+                      <button
+                        type="button"
+                        className="text-link"
+                        onClick={() => setUseCustomPayout(true)}
+                      >
+                        Use a different account
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      className="text-link"
-                      onClick={() => setUseCustomPayout(true)}
-                    >
-                      Use a different account
-                    </button>
-                  </div>
-                  <span className="text-xs font-mono" style={{ color: 'var(--ink-4)' }}>
-                    From your profile's payout details.
-                  </span>
-                </>
-              )}
-
-              {useCustomPayout && (
-                <div className="flex flex-col gap-3">
-                  {hasSavedPayout && (
-                    <button
-                      type="button"
-                      className="text-link self-start"
-                      onClick={() => setUseCustomPayout(false)}
-                    >
-                      ← Use my saved account instead
-                    </button>
-                  )}
-
-                  <input type="hidden" name="use_custom_payout" value="1" />
-
-                  <select name="payout_method" required className="field-input" defaultValue={savedPayout.method ?? ''}>
-                    <option value="" disabled>Select a payout method</option>
-                    {PAYOUT_METHOD_OPTIONS.map(o => (
-                      <option key={o.value} value={o.value}>{o.label}</option>
-                    ))}
-                  </select>
-
-                  <input
-                    type="text"
-                    name="payout_account_name"
-                    required
-                    placeholder="Account name"
-                    defaultValue={savedPayout.accountName ?? ''}
-                    className="field-input"
-                  />
-
-                  <input
-                    type="text"
-                    name="payout_account_number"
-                    required
-                    placeholder="Account / mobile number"
-                    defaultValue={savedPayout.accountNumber ?? ''}
-                    className="field-input"
-                  />
-
-                  {!hasSavedPayout && (
                     <span className="text-xs font-mono" style={{ color: 'var(--ink-4)' }}>
-                      No saved payout details on your profile yet — this will be used for this loan only.
-                      You can save it to your profile afterwards.
+                      From your profile's payout details.
                     </span>
-                  )}
-                </div>
-              )}
-            </div>
+                  </>
+                )}
+
+                {useCustomPayout && (
+                  <div className="flex flex-col gap-3">
+                    {hasSavedPayout && (
+                      <button
+                        type="button"
+                        className="text-link self-start"
+                        onClick={() => setUseCustomPayout(false)}
+                      >
+                        ← Use my saved account instead
+                      </button>
+                    )}
+
+                    <input type="hidden" name="use_custom_payout" value="1" />
+
+                    <select name="payout_method" required className="field-input" defaultValue={savedPayout.method ?? ''}>
+                      <option value="" disabled>Select a payout method</option>
+                      {PAYOUT_METHOD_OPTIONS.map(o => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+
+                    <input
+                      type="text"
+                      name="payout_account_name"
+                      required
+                      placeholder="Account name"
+                      defaultValue={savedPayout.accountName ?? ''}
+                      className="field-input"
+                    />
+
+                    <input
+                      type="text"
+                      name="payout_account_number"
+                      required
+                      placeholder="Account / mobile number"
+                      defaultValue={savedPayout.accountNumber ?? ''}
+                      className="field-input"
+                    />
+
+                    {!hasSavedPayout && (
+                      <span className="text-xs font-mono" style={{ color: 'var(--ink-4)' }}>
+                        No saved payout details on your profile yet — this will be used for this loan only.
+                        You can save it to your profile afterwards.
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             {error && (
               <div
@@ -383,8 +446,8 @@ export default function ApplyForm({ savedPayout }: { savedPayout: SavedPayout })
               </div>
             )}
 
-            <button type="submit" disabled={isPending} className="btn-primary w-full">
-              {isPending ? 'Submitting…' : 'Submit application'}
+            <button type="submit" disabled={isPending || exceedsCredit} className="btn-primary w-full">
+              {exceedsCredit ? 'Exceeds available credit' : isPending ? 'Submitting…' : 'Submit application'}
             </button>
 
             <p className="text-xs text-center" style={{ color: 'var(--ink-4)' }}>

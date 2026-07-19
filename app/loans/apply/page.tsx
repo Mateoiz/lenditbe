@@ -1,6 +1,7 @@
 // app/loans/apply/page.tsx
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { getAvailableCredit } from '@/lib/credit'
 import ApplyForm from './ApplyForm'
 
 export default async function LoanApplyPage() {
@@ -8,11 +9,14 @@ export default async function LoanApplyPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: borrower } = await supabase
-    .from('borrowers')
-    .select('disbursement_method, disbursement_account_name, disbursement_account_number')
-    .eq('id', user.id)
-    .maybeSingle()
+  const [{ data: borrower }, credit] = await Promise.all([
+    supabase
+      .from('borrowers')
+      .select('disbursement_method, disbursement_account_name, disbursement_account_number')
+      .eq('id', user.id)
+      .maybeSingle(),
+    getAvailableCredit(supabase, user.id),
+  ])
 
   return (
     <ApplyForm
@@ -21,6 +25,7 @@ export default async function LoanApplyPage() {
         accountName: borrower?.disbursement_account_name ?? null,
         accountNumber: borrower?.disbursement_account_number ?? null,
       }}
+      availableCredit={credit.availableCredit}
     />
   )
 }

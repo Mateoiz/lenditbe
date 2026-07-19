@@ -1,12 +1,16 @@
 // src/app/page.tsx
 'use client'
 
+import { useState } from 'react'
 import Image from 'next/image'
 import Navbar from '@/components/Navbar'
 import Footer from '@/components/Footer'
 import CyclingPhrase from '@/components/CyclingPhrase'
+import FinancingOptions from '@/components/FinancingOptions'
 
 export default function HomePage() {
+  const [selected, setSelected] = useState<{ price: number; title: string } | null>(null)
+
   return (
     <>
       <style>{`
@@ -351,23 +355,34 @@ export default function HomePage() {
 
             <div className="grid md:grid-cols-3 gap-5 mb-10">
               {[
-                { src: 'https://images.unsplash.com/photo-1610945415295-d9bbf067e59c?q=80&w=800', tag: 'GADGETS', title: 'Samsung Galaxy A55 5G', price: '₱18,999', mo: '₱1,650/mo' },
-                { src: 'https://images.unsplash.com/photo-1611186871348-b1ce696e52c9?q=80&w=800', tag: 'GADGETS', title: 'MacBook Air M2', price: '₱58,999', mo: '₱4,850/mo' },
-                { src: 'https://images.unsplash.com/photo-1571175443880-49e1d25b2bc5?q=80&w=800', tag: 'APPLIANCES', title: '2-Door Refrigerator', price: '₱24,999', mo: '₱2,180/mo' },
+                { src: 'https://images.unsplash.com/photo-1610945415295-d9bbf067e59c?q=80&w=800', tag: 'GADGETS', title: 'Samsung Galaxy A55 5G', price: 18999, displayPrice: '₱18,999', mo: '₱1,650/mo' },
+                { src: 'https://images.unsplash.com/photo-1611186871348-b1ce696e52c9?q=80&w=800', tag: 'GADGETS', title: 'MacBook Air M2', price: 58999, displayPrice: '₱58,999', mo: '₱4,850/mo' },
+                { src: 'https://images.unsplash.com/photo-1571175443880-49e1d25b2bc5?q=80&w=800', tag: 'APPLIANCES', title: '2-Door Refrigerator', price: 24999, displayPrice: '₱24,999', mo: '₱2,180/mo' },
               ].map((p) => (
-                <div key={p.title} className="card overflow-hidden">
-                  <div className="relative h-40">
-                    <Image src={p.src} alt={p.title} fill className="object-cover" />
-                    <div className="absolute top-3 left-3">
-                      <span className="font-mono text-xs px-2.5 py-1 rounded-lg" style={{ background: 'rgba(255,255,255,0.9)', color: 'var(--teal-dark)', border: '1px solid var(--teal-bdr)', backdropFilter: 'blur(8px)' }}>{p.tag}</span>
+                <div key={p.title} className="card overflow-hidden flex flex-col justify-between">
+                  <div>
+                    <div className="relative h-40">
+                      <Image src={p.src} alt={p.title} fill className="object-cover" />
+                      <div className="absolute top-3 left-3">
+                        <span className="font-mono text-xs px-2.5 py-1 rounded-lg" style={{ background: 'rgba(255,255,255,0.9)', color: 'var(--teal-dark)', border: '1px solid var(--teal-bdr)', backdropFilter: 'blur(8px)' }}>{p.tag}</span>
+                      </div>
+                    </div>
+                    <div className="p-5 pb-3">
+                      <h3 className="font-semibold mb-2 text-sm" style={{ color: 'var(--ink)' }}>{p.title}</h3>
+                      <div className="flex items-end justify-between">
+                        <div className="font-display text-lg" style={{ color: 'var(--ink)', fontWeight: 500 }}>{p.displayPrice}</div>
+                        <div className="font-mono text-xs" style={{ color: 'var(--teal-dark)' }}>as low as {p.mo}</div>
+                      </div>
                     </div>
                   </div>
-                  <div className="p-5">
-                    <h3 className="font-semibold mb-2 text-sm" style={{ color: 'var(--ink)' }}>{p.title}</h3>
-                    <div className="flex items-end justify-between">
-                      <div className="font-display text-lg" style={{ color: 'var(--ink)', fontWeight: 500 }}>{p.price}</div>
-                      <div className="font-mono text-xs" style={{ color: 'var(--teal-dark)' }}>as low as {p.mo}</div>
-                    </div>
+                  <div className="p-5 pt-0">
+                    <button
+                      onClick={() => setSelected({ price: p.price, title: p.title })}
+                      className="w-full text-center text-sm font-medium py-2.5 rounded-lg transition-all"
+                      style={{ background: 'var(--teal-dark)', color: 'white' }}
+                    >
+                      Finance this item
+                    </button>
                   </div>
                 </div>
               ))}
@@ -378,6 +393,14 @@ export default function HomePage() {
             </div>
           </div>
         </section>
+
+        {selected && (
+          <FinancingOptions
+            price={selected.price}
+            purpose={selected.title}
+            onClose={() => setSelected(null)}
+          />
+        )}
 
         <section className="py-20 px-6">
           <div className="max-w-3xl mx-auto text-center">
