@@ -66,6 +66,7 @@ export default function ApplyForm({
   const prefillInstallments = searchParams.get('num_installments')
   const isPrefilled = !!(prefillAmount && prefillTermDays)
 
+  const [agreedToTerms, setAgreedToTerms] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
   const [termDays, setTermDays] = useState<number | ''>(prefillTermDays ? Number(prefillTermDays) : '')
@@ -506,6 +507,45 @@ export default function ApplyForm({
               </div>
             )}
 
+            <div
+              className="flex flex-col gap-3 p-4 rounded-lg"
+              style={{ background: 'var(--paper-2)', border: '1.5px solid var(--line-md)' }}
+            >
+              <div className="text-xs leading-relaxed" style={{ color: 'var(--ink-3)' }}>
+                <strong style={{ color: 'var(--ink)' }}>Terms &amp; Conditions.</strong> By
+                submitting this application, you certify that all information provided —
+                including your identity, income, address, and payout/shipping details —
+                is true and accurate. Submitting false, misleading, or fraudulent
+                information, or using another person's identity or account to obtain a
+                loan, constitutes loan fraud and may expose you to civil liability and
+                criminal prosecution under applicable Philippine laws, including but not
+                limited to the Revised Penal Code provisions on estafa (swindling), the
+                Access Devices Regulation Act (RA 8484), the Cybercrime Prevention Act
+                (RA 10175), and the Financing Company Act / Lending Company Regulation
+                Act, as applicable. Lendit Be reserves the right to report suspected
+                fraud to the National Bureau of Investigation (NBI), the Philippine
+                National Police (PNP), the Securities and Exchange Commission (SEC), and
+                other relevant authorities, and to pursue collection and legal remedies
+                for any resulting losses.
+              </div>
+
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  name="agreed_to_terms"
+                  required
+                  checked={agreedToTerms}
+                  onChange={(e) => setAgreedToTerms(e.target.checked)}
+                  style={{ marginTop: 3, cursor: 'pointer' }}
+                />
+                <span className="text-xs font-semibold" style={{ color: 'var(--ink)' }}>
+                  I have read and agree to the Terms &amp; Conditions above, and I
+                  understand that fraudulent applications are subject to criminal and
+                  civil liability.
+                </span>
+              </label>
+            </div>
+
             {error && (
               <div
                 role="alert"
@@ -516,8 +556,18 @@ export default function ApplyForm({
               </div>
             )}
 
-            <button type="submit" disabled={isPending || exceedsCredit} className="btn-primary w-full">
-              {exceedsCredit ? 'Exceeds available credit' : isPending ? 'Submitting…' : 'Submit application'}
+            <button
+              type="submit"
+              disabled={isPending || exceedsCredit || !agreedToTerms}
+              className="btn-primary w-full"
+            >
+              {exceedsCredit
+                ? 'Exceeds available credit'
+                : !agreedToTerms
+                ? 'Please accept the Terms & Conditions'
+                : isPending
+                ? 'Submitting…'
+                : 'Submit application'}
             </button>
 
             <p className="text-xs text-center" style={{ color: 'var(--ink-4)' }}>

@@ -234,6 +234,30 @@ export default async function DashboardPage() {
         }
         .sidebar-nav-label { font-size:14px; font-weight:600; color:var(--ink-2); transition:color 0.15s ease; }
         .sidebar-nav-sub { font-family:'Space Mono',monospace; font-size:10.5px; color:var(--ink-4); margin-top:2px; display:block; }
+
+        /* ── Tablet / Mobile: Pay CTA, Installment Schedule, Sidebar stacking ── */
+        @media (max-width: 768px) {
+          .hero-action { padding:20px; gap:16px; }
+          .hero-amount { font-size:30px; }
+          .hero-action .btn-primary.lg { width:100%; padding:14px 20px; font-size:14px; }
+
+          .ledger-table-wrap { display:none; }
+          .installment-cards { display:flex; flex-direction:column; }
+        }
+        .installment-cards { display:none; }
+
+        .inst-card {
+          display:flex; flex-direction:column; gap:10px;
+          padding:16px 20px; border-bottom:1px dashed var(--line);
+        }
+        .inst-card:last-child { border-bottom:none; }
+        .inst-card-top { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+        .inst-card-num { font-family:'Space Mono',monospace; font-weight:700; font-size:13px; color:var(--ink); }
+        .inst-card-due { font-family:'Space Mono',monospace; font-size:11px; color:var(--ink-3); }
+        .inst-card-amounts { display:flex; align-items:baseline; justify-content:space-between; gap:12px; }
+        .inst-card-due-amt { font-family:'Fraunces',Georgia,serif; font-size:20px; color:var(--ink); font-weight:500; }
+        .inst-card-paid { font-family:'Space Mono',monospace; font-size:11px; color:var(--ink-4); }
+        .inst-card-btn { width:100%; text-align:center; }
       `}</style>
 
       <div className="min-h-screen" style={{ background: 'var(--paper)' }}>
@@ -411,7 +435,7 @@ export default async function DashboardPage() {
           )}
 
           {/* ── ASYMMETRIC DESKTOP GRID (2/3 Left + 1/3 Right) ── */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+<div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-start">
             
             {/* Left Column (2 Spans): Active Ledger OR Repayment Track Record */}
             <div className="lg:col-span-2 flex flex-col gap-8">
@@ -497,6 +521,65 @@ export default async function DashboardPage() {
                         })}
                       </tbody>
                     </table>
+                  </div>
+
+                  {/* Mobile stacked cards (shown instead of the table under 768px) */}
+                  <div className="installment-cards">
+                    {installments.map((inst) => {
+                      const due = Number(inst.amount_due);
+                      const paid = Number(inst.amount_paid);
+                      const isPaid = paid >= due;
+                      const isOver = inst.status === 'overdue';
+                      const isNext = nextInstallment?.id === inst.id;
+
+                      return (
+                        <div
+                          key={inst.id}
+                          className="inst-card"
+                          style={{ background: isNext ? 'var(--marigold-bg)' : 'transparent' }}
+                        >
+                          <div className="inst-card-top">
+                            <span className="inst-card-num">
+                              #{String(inst.installment_number).padStart(2, '0')}
+                            </span>
+                            {isPaid ? (
+                              <span className="stamp flat" style={{ fontSize: 10, padding: '2px 6px', color: 'var(--teal-dark)', borderColor: 'var(--teal)', background: 'var(--teal-bg)' }}>
+                                ✓ Paid
+                              </span>
+                            ) : isOver ? (
+                              <span className="stamp flat" style={{ fontSize: 10, padding: '2px 6px', color: 'var(--magenta)', borderColor: 'var(--magenta)', background: 'var(--magenta-bg)' }}>
+                                Overdue
+                              </span>
+                            ) : isNext ? (
+                              <span className="stamp flat" style={{ fontSize: 10, padding: '2px 6px', color: 'var(--marigold-dark)', borderColor: 'var(--marigold-dark)', background: '#FFF' }}>
+                                Due Next
+                              </span>
+                            ) : (
+                              <span className="inst-card-due">Upcoming</span>
+                            )}
+                          </div>
+
+                          <div className="inst-card-amounts">
+                            <div>
+                              <div className="inst-card-due-amt">{peso(due)}</div>
+                              <div className="inst-card-paid">Paid so far: {peso(paid)}</div>
+                            </div>
+                            <span className="inst-card-due" style={{ color: isOver ? 'var(--magenta)' : 'var(--ink-3)' }}>
+                              Due {formatDate(inst.due_date)}
+                            </span>
+                          </div>
+
+                          {!isPaid && (
+                            <Link
+                              href={`/loans/${activeLoan.id}/pay`}
+                              className={`btn-primary sm inst-card-btn ${isNext || isOver ? '' : 'opacity-60'}`}
+                            >
+                              Pay {pesoShort(due - paid)}
+                            </Link>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
 
                   {/* Journey Tracker Footer */}
