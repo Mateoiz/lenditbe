@@ -3,44 +3,24 @@
 import { useMemo, useState } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
-import FinancingOptions from '@/components/FinancingOptions'
-
-const CATEGORIES = ['All', 'Gadgets', 'Appliances', 'Furniture'] as const
-
-// FIX: tags now match CATEGORIES exactly (title case) — no case-folding needed
-// FIX: replaced broken "photo-1washer" and duplicate "1844bbd07222" Unsplash IDs
-const PRODUCTS = [
-  { src: 'https://images.unsplash.com/photo-1610945415295-d9bbf067e59c?q=80&w=800', tag: 'Gadgets',    title: 'Samsung Galaxy A55 5G',         price: 18999, mo: '₱1,650/mo', popular: true  },
-  { src: 'https://images.unsplash.com/photo-1611186871348-b1ce696e52c9?q=80&w=800', tag: 'Gadgets',    title: 'MacBook Air M2',                 price: 58999, mo: '₱4,850/mo', popular: true  },
-  { src: 'https://images.unsplash.com/photo-1587033411391-5d9e51cce126?q=80&w=800', tag: 'Gadgets',    title: 'iPad 10th Gen',                  price: 21999, mo: '₱1,920/mo', popular: false },
-  { src: 'https://images.unsplash.com/photo-1546868871-7041f2a55e12?q=80&w=800', tag: 'Gadgets',    title: 'Sony WH-1000XM5',                price: 17999, mo: '₱1,570/mo', popular: false },
-  { src: 'https://images.unsplash.com/photo-1571175443880-49e1d25b2bc5?q=80&w=800', tag: 'Appliances', title: '2-Door Refrigerator',            price: 24999, mo: '₱2,180/mo', popular: true  },
-  { src: 'https://images.unsplash.com/photo-1626806787461-102c1bfaaea1?q=80&w=800', tag: 'Appliances', title: 'Front-Load Washing Machine',     price: 27999, mo: '₱2,440/mo', popular: false },
-  { src: 'https://images.unsplash.com/photo-1631679706909-1844bbd07221?q=80&w=800', tag: 'Appliances', title: 'Split-Type Air Conditioner',     price: 32999, mo: '₱2,870/mo', popular: false },
-  { src: 'https://images.unsplash.com/photo-1555041469-a586c61ea9bc?q=80&w=800', tag: 'Furniture',  title: '3-Seater Sofa',                  price: 22999, mo: '₱2,000/mo', popular: false },
-  { src: 'https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?q=80&w=800', tag: 'Furniture',  title: 'Queen Bed Frame + Mattress',     price: 26999, mo: '₱2,350/mo', popular: true  },
-]
+import { CATEGORIES, PRODUCTS } from '@/lib/products'
 
 export default function ProductsPage() {
   const [category, setCategory] = useState<typeof CATEGORIES[number]>('All')
   const [search, setSearch] = useState('')
-  const [selected, setSelected] = useState<{ price: number; title: string; src: string } | null>(null)
 
-  // QoL: count per category for pill badges
   const categoryCounts = useMemo<Record<string, number>>(() => {
     const counts: Record<string, number> = { All: PRODUCTS.length }
     for (const cat of CATEGORIES.slice(1)) {
-      counts[cat] = PRODUCTS.filter(p => p.tag === cat).length
+      counts[cat] = PRODUCTS.filter((p) => p.tag === cat).length
     }
     return counts
   }, [])
 
   const filtered = useMemo(() => {
-    // FIX: exact match now that tags are title-cased to match CATEGORIES
-    let results = category === 'All' ? PRODUCTS : PRODUCTS.filter(p => p.tag === category)
-    // QoL: search filter
+    let results = category === 'All' ? PRODUCTS : PRODUCTS.filter((p) => p.tag === category)
     const q = search.trim().toLowerCase()
-    if (q) results = results.filter(p => p.title.toLowerCase().includes(q))
+    if (q) results = results.filter((p) => p.title.toLowerCase().includes(q))
     return results
   }, [category, search])
 
@@ -81,7 +61,6 @@ export default function ProductsPage() {
           font-family:'Space Mono',monospace;
         }
 
-        /* QoL: category pill with count badge */
         .cat-pill {
           display:inline-flex; align-items:center; gap:6px;
           font-family:'Space Mono',monospace; font-size:12px; font-weight:700;
@@ -98,7 +77,6 @@ export default function ProductsPage() {
         }
         .cat-pill:not(.active) .count { background:var(--paper-2); color:var(--ink-4); }
 
-        /* QoL: search input */
         .search-input {
           width:100%; padding:10px 14px 10px 38px; border-radius:9999px;
           border:1.5px solid var(--line-md); background:var(--card);
@@ -110,7 +88,6 @@ export default function ProductsPage() {
         .search-wrap { position:relative; }
         .search-icon { position:absolute; left:12px; top:50%; transform:translateY(-50%); pointer-events:none; color:var(--ink-4); }
 
-        /* QoL: popular badge */
         .popular-badge {
           display:inline-flex; align-items:center; gap:4px;
           font-family:'Space Mono',monospace; font-size:10px; font-weight:700;
@@ -123,12 +100,11 @@ export default function ProductsPage() {
           width:100%; text-align:center; font-size:13px; font-weight:700; padding:11px 16px;
           border-radius:4px; border:1.5px solid var(--ink); box-shadow:2px 2px 0 var(--ink);
           background:var(--teal-dark); color:white; cursor:pointer;
-          transition:all 0.15s ease; font-family:'Inter',sans-serif;
+          transition:all 0.15s ease; font-family:'Inter',sans-serif; display:block; text-decoration:none;
         }
         .finance-btn:hover { transform:translate(-1px,-1px); box-shadow:3px 3px 0 var(--ink); }
         .finance-btn:active { transform:translate(1px,1px); box-shadow:1px 1px 0 var(--ink); }
 
-        /* QoL: grid fade-in on filter change */
         @keyframes card-in { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
         .product-grid .card { animation: card-in 0.2s ease forwards; }
       `}</style>
@@ -165,7 +141,6 @@ export default function ProductsPage() {
           </div>
         </section>
 
-        {/* Sticky filter bar with search */}
         <section
           className="py-4 px-6"
           style={{
@@ -175,7 +150,6 @@ export default function ProductsPage() {
           }}
         >
           <div className="max-w-6xl mx-auto flex items-center gap-3 flex-wrap">
-            {/* Category pills with count badges */}
             <div className="flex items-center gap-2 flex-wrap flex-1">
               {CATEGORIES.map((c) => (
                 <button
@@ -189,7 +163,6 @@ export default function ProductsPage() {
               ))}
             </div>
 
-            {/* QoL: search box */}
             <div className="search-wrap" style={{ minWidth: 200, maxWidth: 260, width: '100%' }}>
               <span className="search-icon">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -200,7 +173,7 @@ export default function ProductsPage() {
                 type="text"
                 placeholder="Search items…"
                 value={search}
-                onChange={e => setSearch(e.target.value)}
+                onChange={(e) => setSearch(e.target.value)}
                 className="search-input"
               />
             </div>
@@ -210,7 +183,6 @@ export default function ProductsPage() {
         <section className="py-12 px-6">
           <div className="max-w-6xl mx-auto">
 
-            {/* QoL: results count + context */}
             <p className="font-mono text-xs mb-6" style={{ color: 'var(--ink-4)', letterSpacing: '0.06em' }}>
               {isSearching
                 ? `${filtered.length} result${filtered.length !== 1 ? 's' : ''} for "${search.trim()}"${category !== 'All' ? ` in ${category}` : ''}`
@@ -221,10 +193,9 @@ export default function ProductsPage() {
             {filtered.length > 0 ? (
               <div className="product-grid grid sm:grid-cols-2 md:grid-cols-3 gap-5">
                 {filtered.map((p) => (
-                  <div key={p.title} className="card overflow-hidden flex flex-col justify-between">
-                    <div>
+                  <div key={p.slug} className="card overflow-hidden flex flex-col justify-between">
+                    <Link href={`/products/${p.slug}`} className="block">
                       <div className="relative h-44">
-                        {/* FIX: added sizes prop to silence Next.js Image warnings */}
                         <Image
                           src={p.src}
                           alt={p.title}
@@ -239,10 +210,7 @@ export default function ProductsPage() {
                           >
                             {p.tag}
                           </span>
-                          {/* QoL: popular badge */}
-                          {p.popular && (
-                            <span className="popular-badge">★ Popular</span>
-                          )}
+                          {p.popular && <span className="popular-badge">★ Popular</span>}
                         </div>
                       </div>
                       <div className="p-5 pb-3">
@@ -254,20 +222,16 @@ export default function ProductsPage() {
                           <div className="font-mono text-xs" style={{ color: 'var(--teal-dark)' }}>as low as {p.mo}</div>
                         </div>
                       </div>
-                    </div>
+                    </Link>
                     <div className="p-5 pt-2">
-                      <button
-                        onClick={() => setSelected({ price: p.price, title: p.title, src: p.src })}
-                        className="finance-btn"
-                      >
-                        Finance this item →
-                      </button>
+                      <Link href={`/products/${p.slug}`} className="finance-btn">
+                        View & finance →
+                      </Link>
                     </div>
                   </div>
                 ))}
               </div>
             ) : (
-              /* QoL: contextual empty state */
               <div className="text-center py-20">
                 {isSearching ? (
                   <>
@@ -292,15 +256,6 @@ export default function ProductsPage() {
             )}
           </div>
         </section>
-
-        {selected && (
-          <FinancingOptions
-            price={selected.price}
-            purpose={selected.title}
-            imageSrc={selected.src}
-            onClose={() => setSelected(null)}
-          />
-        )}
       </div>
     </>
   )
