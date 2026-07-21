@@ -34,8 +34,8 @@ export const PRODUCTS: Product[] = [
     mo: '₱1,650/mo',
     popular: true,
     description: 'A mid-range 5G phone with a bright AMOLED display and all-day battery life.',
-    colors: [
-      { name: 'Awesome Navy', hex: '#1F2A44' },
+colors: [
+      { name: 'Awesome Navy',  hex: '#1F2A44' },
       { name: 'Awesome Lilac', hex: '#B7A7D6' },
       { name: 'Awesome Lemon', hex: '#E9DD8F' },
     ],
@@ -53,11 +53,11 @@ export const PRODUCTS: Product[] = [
     mo: '₱4,850/mo',
     popular: true,
     description: 'Thin, silent, and fast enough for everyday work, school, and creative projects.',
-    colors: [
-      { name: 'Midnight', hex: '#1E2530' },
-      { name: 'Starlight', hex: '#F0E6D6' },
+colors: [
+      { name: 'Midnight',   hex: '#1E2530' },
+      { name: 'Starlight',  hex: '#F0E6D6' },
       { name: 'Space Gray', hex: '#5B5C5E' },
-      { name: 'Silver', hex: '#E5E6E8' },
+      { name: 'Silver',     hex: '#E5E6E8' },
     ],
     specs: [
       { label: '8GB / 256GB', mo: '₱4,850/mo', priceDelta: 0 },
@@ -108,9 +108,9 @@ export const PRODUCTS: Product[] = [
     mo: '₱4,180/mo',
     popular: true,
     description: 'Dynamic Island, a 48MP main camera, and USB-C in Apple’s standard flagship.',
-    colors: [
-      { name: 'Blue', hex: '#A7C3D9' },
-      { name: 'Pink', hex: '#F1D2D8' },
+colors: [
+      { name: 'Blue',  hex: '#A7C3D9' },
+      { name: 'Pink',  hex: '#F1D2D8' },
       { name: 'Black', hex: '#2B2B2E' },
       { name: 'Green', hex: '#B9C6AE' },
     ],

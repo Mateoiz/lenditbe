@@ -118,10 +118,10 @@ export async function submitLoanApplication(formData: FormData) {
     throw new Error('This item exceeds your available credit.')
   }
 
-  const interestRate = 0.05
-  const serviceFeeRate = 0.02
-  const totalInterest = principalAmount * interestRate
-  const processingFee = principalAmount * serviceFeeRate
+const interestRate = 5 // stored as a whole percentage (5 = 5%), not a decimal
+  const serviceFeeRate = 2 // same convention
+  const totalInterest = principalAmount * (interestRate / 100)
+  const processingFee = principalAmount * (serviceFeeRate / 100)
   const totalRepayable = principalAmount + totalInterest + processingFee
 
   const { data: loan, error: insertError } = await supabase

@@ -41,8 +41,9 @@ export default async function DashboardPage() {
   const activeLoan = loans?.find((l) => ['approved', 'active', 'disbursed', 'overdue'].includes(l.status))
   const pendingLoan = loans?.find((l) => l.status === 'pending')
 
-  let installments: any[] = []
+let installments: any[] = []
   if (activeLoan) {
+    await supabase.rpc('apply_late_fees_for_loan', { p_loan_id: activeLoan.id })
     const { data } = await supabase
       .from('loan_installments')
       .select('*')
@@ -50,8 +51,7 @@ export default async function DashboardPage() {
       .order('installment_number', { ascending: true })
     installments = data ?? []
   }
-  const nextInstallment = installments.find(i => Number(i.amount_paid) < Number(i.amount_due)) ?? null
-
+  const nextInstallment = installments.find(i => Math.round((Number(i.amount_due) + Number(i.late_fee ?? 0) - Number(i.amount_paid)) * 100) / 100 >= 0.05) ?? null
   const { data: recentPayments } = await supabase
     .from('payments').select('*').eq('borrower_id', user.id).order('paid_at', { ascending: false }).limit(6)
 
@@ -75,9 +75,10 @@ export default async function DashboardPage() {
   const journeyStatus = activeLoan?.status === 'overdue' ? 'active' : (activeLoan?.status ?? null)
   const journeyIndex = journeyStatus ? JOURNEY_STEPS.indexOf(journeyStatus as any) : -1
 
-  const paidSoFar = installments.reduce((s, i) => s + Number(i.amount_paid), 0)
+const paidSoFar = installments.reduce((s, i) => s + Number(i.amount_paid), 0)
+  const totalLateFees = installments.reduce((s, i) => s + Number(i.late_fee ?? 0), 0)
   const repaymentPct = activeLoan
-    ? Math.min(100, Math.round((paidSoFar / Number(activeLoan.total_repayable)) * 100))
+    ? Math.min(100, Math.round((paidSoFar / (Number(activeLoan.total_repayable) + totalLateFees)) * 100))
     : 0
 
   const dueDays = nextInstallment ? daysUntil(nextInstallment.due_date) : null
@@ -99,7 +100,7 @@ export default async function DashboardPage() {
       title: isOverdue
         ? `Payment overdue by ${Math.abs(dueDays!)} day${Math.abs(dueDays!) !== 1 ? 's' : ''}`
         : dueDays === 0 ? 'Payment due today' : `Payment due in ${dueDays} day${dueDays !== 1 ? 's' : ''}`,
-      body: `${peso(Number(nextInstallment.amount_due) - Number(nextInstallment.amount_paid))} for installment #${nextInstallment.installment_number}`,
+      body: `${peso(Number(nextInstallment.amount_due) + Number(nextInstallment.late_fee ?? 0) - Number(nextInstallment.amount_paid))} for installment #${nextInstallment.installment_number}`,
       cta: { href: `/loans/${activeLoan.id}/pay`, label: 'Pay now' },
     }
   }
@@ -282,10 +283,10 @@ export default async function DashboardPage() {
             <p className="hero-eyebrow" style={{ color: isOverdue ? 'var(--magenta)' : 'var(--teal-dark)' }}>
               {isOverdue ? 'Payment overdue' : 'Next installment due'}
             </p>
-            <p className="hero-amount">
+<p className="hero-amount">
               {nextInstallment
-                ? peso(Number(nextInstallment.amount_due) - Number(nextInstallment.amount_paid))
-                : peso(Number(activeLoan.total_repayable) - paidSoFar)}
+                ? peso(Number(nextInstallment.amount_due) + Number(nextInstallment.late_fee ?? 0) - Number(nextInstallment.amount_paid))
+                : peso(Number(activeLoan.total_repayable) + totalLateFees - paidSoFar)}
             </p>
             <p className="hero-sub">
               {nextInstallment
@@ -379,10 +380,12 @@ export default async function DashboardPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {installments.map((inst) => {
+{installments.map((inst) => {
                       const due = Number(inst.amount_due)
                       const paid = Number(inst.amount_paid)
-                      const isPaid = paid >= due
+                      const lateFee = Number(inst.late_fee ?? 0)
+                      const owedThis = due + lateFee - paid
+                      const isPaid = Math.round(owedThis * 100) / 100 < 0.05
                       const isOver = inst.status === 'overdue'
                       const isNext = nextInstallment?.id === inst.id
 
@@ -394,7 +397,14 @@ export default async function DashboardPage() {
                           <td className="font-mono text-xs" style={{ color: isOver ? 'var(--magenta)' : 'var(--ink-2)' }}>
                             {formatDate(inst.due_date)}
                           </td>
-                          <td className="font-mono font-bold" style={{ color: 'var(--ink)' }}>{peso(due)}</td>
+                          <td className="font-mono font-bold" style={{ color: 'var(--ink)' }}>
+                            {peso(due)}
+                            {lateFee > 0 && (
+                              <div className="font-mono" style={{ fontSize: 10, color: 'var(--magenta)', fontWeight: 400 }}>
+                                +{peso(lateFee)} late fee
+                              </div>
+                            )}
+                          </td>
                           <td className="font-mono" style={{ color: isPaid ? 'var(--teal-dark)' : 'var(--ink-4)' }}>{peso(paid)}</td>
                           <td>
                             {isPaid ? (
@@ -410,7 +420,7 @@ export default async function DashboardPage() {
                           <td style={{ paddingRight: 24, textAlign: 'right' }}>
                             {!isPaid && (
                               <Link href={`/loans/${activeLoan.id}/pay`} className={`btn-primary sm ${isNext || isOver ? '' : 'opacity-60'}`}>
-                                Pay {pesoShort(due - paid)}
+                                Pay {pesoShort(owedThis)}
                               </Link>
                             )}
                           </td>
@@ -422,15 +432,17 @@ export default async function DashboardPage() {
               </div>
 
               <div className="installment-cards">
-                {installments.map((inst) => {
+              {installments.map((inst) => {
                   const due = Number(inst.amount_due)
                   const paid = Number(inst.amount_paid)
-                  const isPaid = paid >= due
+                  const lateFee = Number(inst.late_fee ?? 0)
+                  const owedThis = due + lateFee - paid
+                  const isPaid = Math.round(owedThis * 100) / 100 < 0.05
                   const isOver = inst.status === 'overdue'
                   const isNext = nextInstallment?.id === inst.id
 
                   return (
-                    <div key={inst.id} className="inst-card" style={{ background: isNext ? 'var(--marigold-bg)' : 'transparent' }}>
+                    <div key={inst.id} className="inst-card"style={{ background: isNext ? 'var(--marigold-bg)' : 'transparent' }}>
                       <div className="inst-card-top">
                         <span className="inst-card-num">#{String(inst.installment_number).padStart(2, '0')}</span>
                         {isPaid ? (
@@ -445,7 +457,12 @@ export default async function DashboardPage() {
                       </div>
                       <div className="inst-card-amounts">
                         <div>
-                          <div className="inst-card-due-amt">{peso(due)}</div>
+                          <div className="inst-card-due-amt">
+                            {peso(due)}
+                            {lateFee > 0 && (
+                              <span style={{ fontSize: 11, color: 'var(--magenta)', marginLeft: 6 }}>+{peso(lateFee)} late</span>
+                            )}
+                          </div>
                           <div className="inst-card-paid">Paid so far: {peso(paid)}</div>
                         </div>
                         <span className="inst-card-due" style={{ color: isOver ? 'var(--magenta)' : 'var(--ink-3)' }}>
@@ -454,7 +471,7 @@ export default async function DashboardPage() {
                       </div>
                       {!isPaid && (
                         <Link href={`/loans/${activeLoan.id}/pay`} className={`btn-primary sm inst-card-btn ${isNext || isOver ? '' : 'opacity-60'}`}>
-                          Pay {pesoShort(due - paid)}
+                          Pay {pesoShort(owedThis)}
                         </Link>
                       )}
                     </div>
@@ -580,7 +597,7 @@ export default async function DashboardPage() {
                   </div>
                   <span style={{ color: 'var(--ink-4)' }}>→</span>
                 </Link>
-              ) : (
+) : (
                 <Link href="/loans" className="sidebar-nav-item">
                   <div className="flex items-center gap-3">
                     <span className="sidebar-nav-icon">
@@ -589,8 +606,8 @@ export default async function DashboardPage() {
                       </svg>
                     </span>
                     <div>
-                      <span className="sidebar-nav-label">Loan history</span>
-                      <span className="sidebar-nav-sub">{loans?.length ?? 0} total loan{(loans?.length ?? 0) !== 1 ? 's' : ''}</span>
+                      <span className="sidebar-nav-label">My loans</span>
+                      <span className="sidebar-nav-sub">View all {loans?.length ?? 0} loan{(loans?.length ?? 0) !== 1 ? 's' : ''}</span>
                     </div>
                   </div>
                   <span style={{ color: 'var(--ink-4)' }}>→</span>

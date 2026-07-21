@@ -1,24 +1,51 @@
 'use client'
 
-import { use, useMemo, useState } from 'react'
+import { use, useEffect, useMemo, useState } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
-import { notFound } from 'next/navigation'
+import { notFound, useRouter, useSearchParams } from 'next/navigation'
 import FinancingOptions from '@/components/FinancingOptions'
 import { getProductBySlug, getRelatedProducts } from '@/lib/products'
+import { createClient } from '@/lib/supabase/client'
 
 export default function ProductDetailPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = use(params)
   const product = getProductBySlug(slug)
   if (!product) notFound()
 
+const router = useRouter()
+  const searchParams = useSearchParams()
   const [color, setColor] = useState(product.colors?.[0]?.name ?? null)
   const [specIndex, setSpecIndex] = useState(0)
   const [financing, setFinancing] = useState(false)
+  const [authed, setAuthed] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    const supabase = createClient()
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setAuthed(!!session)
+      // Auto-open modal if redirected back here after login
+      if (session && searchParams.get('finance') === '1') {
+        setFinancing(true)
+        // Clean the URL without reloading
+        router.replace(`/products/${slug}`, { scroll: false })
+      }
+    })
+  }, [])
+
+  function handleFinanceClick() {
+    if (authed) {
+      setFinancing(true)
+    } else {
+      router.push(`/login?next=/products/${slug}?finance=1`)
+    }
+  }   
 
   const activeSpec = product.specs?.[specIndex]
   const price = product.price + (activeSpec?.priceDelta ?? 0)
   const mo = activeSpec?.mo ?? product.mo
+
+const activeColor = product.colors?.find(c => c.name === color)
 
   const related = useMemo(() => getRelatedProducts(product), [product])
 
@@ -79,7 +106,7 @@ export default function ProductDetailPage({ params }: { params: Promise<{ slug: 
           className="flex items-center justify-between px-6 sm:px-10 py-5"
           style={{ borderBottom: '2px solid var(--ink)', background: 'var(--paper)' }}
         >
-          <Link href="/" className="font-display text-2xl" style={{ color: 'var(--ink)', fontWeight: 600 }}>
+ <Link href="/dashboard" className="font-display text-2xl" style={{ color: 'var(--ink)', fontWeight: 600 }}>
             Lendit
             <span style={{
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -99,8 +126,51 @@ export default function ProductDetailPage({ params }: { params: Promise<{ slug: 
             {/* Image */}
             <div>
               <div className="relative w-full" style={{ aspectRatio: '1 / 1', borderRadius: 16, overflow: 'hidden', border: '1px solid var(--line)' }}>
-                <Image src={product.src} alt={product.title} fill className="object-cover" sizes="(max-width: 768px) 100vw, 50vw" priority />
-              </div>
+                <Image
+                  src={product.src}
+                  alt={product.title}
+                  fill
+                  className="object-cover"
+                  sizes="(max-width: 768px) 100vw, 50vw"
+                  priority
+                />
+                {activeColor && (
+                  <div
+                    style={{
+                      position: 'absolute', inset: 0,
+                      background: activeColor.hex,
+                      mixBlendMode: 'multiply',
+                      opacity: 0.35,
+                      transition: 'background 0.3s ease, opacity 0.3s ease',
+                      pointerEvents: 'none',
+                    }}
+                  />
+                )}
+                {activeColor && (
+                  <div
+                    style={{
+                      position: 'absolute', bottom: 12, left: 12,
+                      display: 'inline-flex', alignItems: 'center', gap: 6,
+                      padding: '5px 10px', borderRadius: 20,
+                      background: 'rgba(255,253,247,0.88)',
+                      backdropFilter: 'blur(6px)',
+                      border: '1px solid rgba(20,17,15,0.12)',
+                      fontSize: 11, fontWeight: 600,
+                      fontFamily: 'Space Mono, monospace',
+                      color: 'var(--ink-2)',
+                      pointerEvents: 'none',
+                    }}
+                  >
+                    <span style={{
+                      width: 10, height: 10, borderRadius: '50%',
+                      background: activeColor.hex,
+                      border: '1px solid rgba(20,17,15,0.2)',
+                      flexShrink: 0,
+                    }} />
+                    {activeColor.name}
+                  </div>
+                )}
+</div>
             </div>
 
             {/* Details */}
@@ -159,8 +229,8 @@ export default function ProductDetailPage({ params }: { params: Promise<{ slug: 
               )}
 
               <div className="flex items-center gap-3 flex-wrap">
-                <button onClick={() => setFinancing(true)} className="finance-btn">
-                  Finance this item →
+<button onClick={handleFinanceClick} className="finance-btn" disabled={authed === null}>
+                  {authed === null ? 'Loading…' : 'Finance this item →'}
                 </button>
                 <span className="text-xs" style={{ color: 'var(--ink-4)' }}>No cash upfront beyond your down payment</span>
               </div>

@@ -18,6 +18,7 @@ type Borrower = {
   city: string | null
   province: string | null
   postal_code: string | null
+  region: string | null
   id_type: string | null
   id_number: string | null
   id_front_image_url: string | null
@@ -144,7 +145,12 @@ function Section({
   )
 }
 
-export default function ProfileForm({ borrower, userEmail }: { borrower: Borrower; userEmail: string }) {
+export default function ProfileForm({ borrower, userEmail, idFrontUrl, idSelfieUrl }: {
+  borrower: Borrower
+  userEmail: string
+  idFrontUrl: string | null
+  idSelfieUrl: string | null
+}) {
   const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
   const isStudent = borrower.employment_type === 'student'
@@ -198,19 +204,19 @@ export default function ProfileForm({ borrower, userEmail }: { borrower: Borrowe
             {borrower.id_number ? `••••${borrower.id_number.slice(-4)}` : '—'}
           </span>
         </div>
-        {(borrower.id_front_image_url || borrower.id_selfie_url) && (
+{(idFrontUrl || idSelfieUrl) && (
           <div className="flex gap-3 mt-3 pt-3" style={{ borderTop: '1px solid var(--line)' }}>
-            {borrower.id_front_image_url && (
+            {idFrontUrl && (
               <img
-                src={borrower.id_front_image_url}
+                src={idFrontUrl}
                 alt="ID front"
                 className="rounded-lg object-cover"
                 style={{ width: 96, height: 60, border: '1px solid var(--line-md)' }}
               />
             )}
-            {borrower.id_selfie_url && (
+            {idSelfieUrl && (
               <img
-                src={borrower.id_selfie_url}
+                src={idSelfieUrl}
                 alt="Verification selfie"
                 className="rounded-lg object-cover"
                 style={{ width: 60, height: 60, border: '1px solid var(--line-md)' }}
@@ -232,11 +238,12 @@ export default function ProfileForm({ borrower, userEmail }: { borrower: Borrowe
         error={error}
         onSaved={() => {}}
         onSubmit={handleSubmit}
-        fields={[
+fields={[
           { label: 'Mobile number', name: 'mobile_number', value: borrower.mobile_number },
           { label: 'Address', name: 'address_line', value: borrower.address_line ?? '' },
-          { label: 'Barangay', name: 'barangay', value: borrower.barangay ?? '' },
+          { label: 'Region', name: 'region', value: borrower.region ?? '' },
           { label: 'City', name: 'city', value: borrower.city ?? '' },
+          { label: 'Barangay', name: 'barangay', value: borrower.barangay ?? '' },
           { label: 'Province', name: 'province', value: borrower.province ?? '' },
           { label: 'Postal code', name: 'postal_code', value: borrower.postal_code ?? '' },
         ]}

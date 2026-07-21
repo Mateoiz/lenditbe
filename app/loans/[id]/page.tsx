@@ -46,7 +46,10 @@ export default async function LoanDetailPage({ params }: { params: Promise<{ id:
     .eq('borrower_id', user.id)
     .maybeSingle()
 
-  if (!loan) notFound()
+if (!loan) notFound()
+
+  // Reconcile late fees against actual due_date before showing the schedule
+  await supabase.rpc('apply_late_fees_for_loan', { p_loan_id: id })
 
   const { data: installments } = await supabase
     .from('loan_installments')
@@ -67,11 +70,12 @@ export default async function LoanDetailPage({ params }: { params: Promise<{ id:
   const totalCount = allInstallments.length
   const progressPct = totalCount > 0 ? Math.round((paidCount / totalCount) * 100) : 0
 
-  const amountPaid = allPayments.reduce((sum, p) => sum + Number(p.amount), 0)
-  const remaining  = Math.max(0, Number(loan.total_repayable) - amountPaid)
+const amountPaid = allPayments.reduce((sum, p) => sum + Number(p.amount), 0)
+  const totalLateFees = allInstallments.reduce((sum, i) => sum + Number(i.late_fee ?? 0), 0)
+  const remaining  = Math.max(0, Number(loan.total_repayable) + totalLateFees - amountPaid)
 
   const meta = STATUS_META[loan.status] ?? STATUS_META.rejected
-  const canPay = ['active', 'disbursed', 'approved', 'overdue'].includes(loan.status)
+const canPay = ['active', 'disbursed', 'approved', 'overdue'].includes(loan.status) && remaining > 0
 
   return (
     <>
@@ -178,7 +182,7 @@ export default async function LoanDetailPage({ params }: { params: Promise<{ id:
             {[
               { label: 'Principal',       value: peso(loan.principal_amount) },
               { label: 'Total repayable', value: peso(loan.total_repayable) },
-              { label: 'Interest rate',   value: `${loan.interest_rate}% p.a.` },
+              { label: 'Interest rate',   value: `${loan.interest_rate}% one-time` },
               { label: 'Term',            value: `${loan.term_days} days` },
             ].map(stat => (
               <div key={stat.label} className="stat-card">
@@ -197,23 +201,24 @@ export default async function LoanDetailPage({ params }: { params: Promise<{ id:
             <div className="p-6">
               <p className="section-label">Fee breakdown</p>
               <div>
-                {[
+{[
                   { label: 'Principal amount', value: peso(loan.principal_amount) },
                   { label: 'Interest',         value: peso(loan.total_interest) },
                   { label: 'Service fee',      value: peso(loan.principal_amount * loan.service_fee_rate / 100) },
                   { label: 'Processing fee',   value: peso(loan.processing_fee) },
+                  ...(totalLateFees > 0 ? [{ label: 'Late fees', value: peso(totalLateFees) }] : []),
                 ].map((row, i, arr) => (
                   <div key={row.label}
                     className={`flex justify-between font-mono text-sm py-2 ${i < arr.length - 1 ? 'border-b' : ''}`}
-                    style={{ borderColor: 'var(--line)', color: 'var(--ink-2)' }}>
+                    style={{ borderColor: 'var(--line)', color: row.label === 'Late fees' ? 'var(--magenta)' : 'var(--ink-2)' }}>
                     <span>{row.label}</span>
-                    <span style={{ color: 'var(--ink)' }}>{row.value}</span>
+                    <span style={{ color: row.label === 'Late fees' ? 'var(--magenta)' : 'var(--ink)' }}>{row.value}</span>
                   </div>
                 ))}
                 <div className="flex justify-between font-mono text-sm pt-3 font-semibold"
                   style={{ borderTop: '2px solid var(--ink)', color: 'var(--ink)', marginTop: 4 }}>
-                  <span>Total repayable</span>
-                  <span>{peso(loan.total_repayable)}</span>
+                  <span>Total repayable{totalLateFees > 0 ? ' (incl. late fees)' : ''}</span>
+                  <span>{peso(Number(loan.total_repayable) + totalLateFees)}</span>
                 </div>
               </div>
             </div>
@@ -224,11 +229,11 @@ export default async function LoanDetailPage({ params }: { params: Promise<{ id:
             // any order/amount — early or partial payments are still fine,
             // this split is purely about what's left to reorganize the list
             // around, not about restricting how installments get paid).
-            const openInstallments = allInstallments
-              .filter(i => Number(i.amount_paid) < Number(i.amount_due))
+const openInstallments = allInstallments
+              .filter(i => Math.round((Number(i.amount_due) + Number(i.late_fee ?? 0) - Number(i.amount_paid)) * 100) / 100 >= 0.05)
               .sort((a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime())
-            const paidInstallments = allInstallments
-              .filter(i => Number(i.amount_paid) >= Number(i.amount_due))
+const paidInstallments = allInstallments
+              .filter(i => Math.round((Number(i.amount_due) + Number(i.late_fee ?? 0) - Number(i.amount_paid)) * 100) / 100 < 0.05)
               .sort((a, b) => new Date(b.due_date).getTime() - new Date(a.due_date).getTime())
 
             const nextDue = openInstallments[0] ?? null
@@ -254,8 +259,8 @@ export default async function LoanDetailPage({ params }: { params: Promise<{ id:
                           style={{ color: nextDue.status === 'overdue' ? 'var(--magenta)' : 'var(--marigold-dark)' }}>
                           Next payment · Installment {nextDue.installment_number}
                         </p>
-                        <p className="font-display text-2xl" style={{ color: 'var(--ink)', fontWeight: 500 }}>
-                          {peso(Number(nextDue.amount_due) - Number(nextDue.amount_paid))}
+<p className="font-display text-2xl" style={{ color: 'var(--ink)', fontWeight: 500 }}>
+                          {peso(Number(nextDue.amount_due) + Number(nextDue.late_fee ?? 0) - Number(nextDue.amount_paid))}
                         </p>
                         <p className="font-mono text-xs mt-1" style={{ color: 'var(--ink-3)' }}>
                           Due {formatDate(nextDue.due_date)}
@@ -297,10 +302,15 @@ export default async function LoanDetailPage({ params }: { params: Promise<{ id:
                                 Due {formatDate(inst.due_date)}
                               </p>
                             </div>
-                            <div className="text-right">
+   <div className="text-right">
                               <p className="font-mono text-sm font-medium" style={{ color: 'var(--ink)' }}>
-                                {peso(Number(inst.amount_due) - Number(inst.amount_paid))}
+                                {peso(Number(inst.amount_due) + Number(inst.late_fee ?? 0) - Number(inst.amount_paid))}
                               </p>
+                              {Number(inst.late_fee ?? 0) > 0 && (
+                                <p className="font-mono text-xs" style={{ color: 'var(--magenta)' }}>
+                                  +{peso(Number(inst.late_fee))} late fee
+                                </p>
+                              )}
                               {Number(inst.amount_paid) > 0 && (
                                 <p className="font-mono text-xs" style={{ color: 'var(--teal-dark)' }}>
                                   {peso(Number(inst.amount_paid))} paid

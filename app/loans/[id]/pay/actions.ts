@@ -36,6 +36,13 @@ export async function submitPayment(
     throw new Error('Installment not found or access denied.')
   }
 
+const { data: allInstallmentsForLoan } = await supabase
+    .from('loan_installments')
+    .select('late_fee')
+    .eq('loan_id', loanId)
+
+  const totalLateFees = (allInstallmentsForLoan ?? []).reduce((s, i) => s + Number(i.late_fee ?? 0), 0)
+
   const { data: priorPayments, error: paymentsError } = await supabase
     .from('payments')
     .select('amount')
@@ -49,7 +56,7 @@ export async function submitPayment(
     (sum, p) => sum + Number(p.amount), 
     0
   )
-  const totalRepayable = Number(installment.loans.total_repayable)
+  const totalRepayable = Number(installment.loans.total_repayable) + totalLateFees
   const outstanding = Math.max(0, Math.round((totalRepayable - totalAlreadyPaid) * 100) / 100)
 
   if (amount > outstanding + 0.01) {
@@ -58,10 +65,10 @@ export async function submitPayment(
     )
   }
 
-  const { data: openInstallments, error: openInstallmentsError } = await supabase
+const { data: openInstallments, error: openInstallmentsError } = await supabase
     .from('loan_installments')
-    .select('id, installment_number, amount_due, amount_paid, status')
-    .eq('loan_id', loanId)
+    .select('id, installment_number, amount_due, amount_paid, status, late_fee')
+    .eq('loan_id', loanId)    
     .neq('status', 'paid')
     .order('installment_number', { ascending: true })
 
@@ -97,8 +104,8 @@ export async function submitPayment(
   for (const inst of orderedTargets) {
     if (remainingAmount <= 0) break
 
-    const currentPaid = Number(inst.amount_paid)
-    const due = Number(inst.amount_due)
+const currentPaid = Number(inst.amount_paid)
+    const due = Number(inst.amount_due) + Number(inst.late_fee ?? 0)
     const owedOnThis = Math.max(0, due - currentPaid)
     
     if (owedOnThis <= 0) continue

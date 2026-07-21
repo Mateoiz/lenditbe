@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import KycQueue from './KycQueue'
-
+export const dynamic = 'force-dynamic'
 export default async function AdminPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -12,15 +12,19 @@ export default async function AdminPage() {
   const { data: admin } = await supabase.from('admins').select('id, role').eq('id', user.id).maybeSingle()
   if (!admin) redirect('/dashboard')
 
-  const adminClient = createAdminClient()
-
+const adminClient = createAdminClient()
+  console.log('service role key loaded:', !!process.env.SUPABASE_SERVICE_ROLE_KEY)
   // Fetch pending KYC submissions (have uploaded docs)
-  const { data: pendingBorrowers } = await adminClient
+const { data: pendingBorrowers, error: pendingError } = await adminClient
     .from('borrowers')
     .select('*')
     .eq('kyc_status', 'pending')
     .not('id_front_image_url', 'is', null)
     .order('updated_at', { ascending: true })
+
+  console.log('pending error:', pendingError)
+  console.log('pending count:', pendingBorrowers?.length)
+  console.log('pending rows:', JSON.stringify(pendingBorrowers))
 
   // Fetch recently reviewed (last 10)
   const { data: reviewedBorrowers } = await adminClient

@@ -14,13 +14,26 @@ export default async function ProfilePage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: borrower } = await supabase
+const { data: borrower } = await supabase
     .from('borrowers')
     .select('*')
     .eq('id', user.id)
     .maybeSingle()
 
   if (!borrower) redirect('/profile/verify')
+
+  async function signedUrl(path: string | null): Promise<string | null> {
+    if (!path) return null
+    const { data } = await supabase.storage
+      .from('kyc-documents')
+      .createSignedUrl(path, 60 * 60)
+    return data?.signedUrl ?? null
+  }
+
+  const [idFrontUrl, idSelfieUrl] = await Promise.all([
+    signedUrl(borrower.id_front_image_url),
+    signedUrl(borrower.id_selfie_url),
+  ])
 
   const { data: loans } = await supabase
     .from('loans')
@@ -177,8 +190,12 @@ export default async function ProfilePage() {
             </div>
           </div>
 
-          <ProfileForm borrower={borrower} userEmail={user.email ?? ''} />
-        </main>
+<ProfileForm
+            borrower={borrower}
+            userEmail={user.email ?? ''}
+            idFrontUrl={idFrontUrl}
+            idSelfieUrl={idSelfieUrl}
+          />        </main>
       </div>
     </>
   )

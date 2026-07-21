@@ -2,6 +2,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import Image from 'next/image'
 import Navbar from '@/components/Navbar'
 import Footer from '@/components/Footer'
@@ -356,9 +357,9 @@ export default function HomePage() {
 
             <div className="grid md:grid-cols-3 gap-5 mb-10">
               {[
-                { src: 'https://images.unsplash.com/photo-1610945415295-d9bbf067e59c?q=80&w=800', tag: 'GADGETS', title: 'Samsung Galaxy A55 5G', price: 18999, displayPrice: '₱18,999', mo: '₱1,650/mo' },
-                { src: 'https://images.unsplash.com/photo-1611186871348-b1ce696e52c9?q=80&w=800', tag: 'GADGETS', title: 'MacBook Air M2', price: 58999, displayPrice: '₱58,999', mo: '₱4,850/mo' },
-                { src: 'https://images.unsplash.com/photo-1571175443880-49e1d25b2bc5?q=80&w=800', tag: 'APPLIANCES', title: '2-Door Refrigerator', price: 24999, displayPrice: '₱24,999', mo: '₱2,180/mo' },
+{ src: 'https://images.unsplash.com/photo-1610945415295-d9bbf067e59c?q=80&w=800', tag: 'GADGETS', title: 'Samsung Galaxy A55 5G', price: 18999, displayPrice: '₱18,999', mo: '₱1,650/mo', slug: 'samsung-galaxy-a55-5g' },
+                { src: 'https://images.unsplash.com/photo-1611186871348-b1ce696e52c9?q=80&w=800', tag: 'GADGETS', title: 'MacBook Air M2', price: 58999, displayPrice: '₱58,999', mo: '₱4,850/mo', slug: 'macbook-air-m2' },
+                { src: 'https://images.unsplash.com/photo-1571175443880-49e1d25b2bc5?q=80&w=800', tag: 'APPLIANCES', title: '2-Door Refrigerator', price: 24999, displayPrice: '₱24,999', mo: '₱2,180/mo', slug: '2-door-refrigerator' },
               ].map((p) => (
                 <div key={p.title} className="card overflow-hidden flex flex-col justify-between">
                   <div>
@@ -376,14 +377,14 @@ export default function HomePage() {
                       </div>
                     </div>
                   </div>
-                  <div className="p-5 pt-0">
-                    <button
-                      onClick={() => setSelected({ price: p.price, title: p.title })}
-                      className="w-full text-center text-sm font-medium py-2.5 rounded-lg transition-all"
+<div className="p-5 pt-0">
+                    <Link
+                      href={`/login?next=/products/${p.slug}`}
+                      className="w-full text-center text-sm font-medium py-2.5 rounded-lg transition-all block"
                       style={{ background: 'var(--teal-dark)', color: 'white' }}
                     >
                       Finance this item
-                    </button>
+                    </Link>
                   </div>
                 </div>
               ))}

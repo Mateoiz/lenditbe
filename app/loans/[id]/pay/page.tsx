@@ -27,7 +27,10 @@ export default async function PayPage({ params }: { params: Promise<{ id: string
     .eq('borrower_id', user.id)
     .maybeSingle()
 
-  if (loanError || !loan) notFound()
+if (loanError || !loan) notFound()
+
+  // Reconcile late fees against actual due_date before computing what's owed
+  await supabase.rpc('apply_late_fees_for_loan', { p_loan_id: id })
 
   // 1. FIX: Exclude 'approved' — loan must be released before accepting payments
   const canPay = ['active', 'disbursed', 'overdue'].includes(loan.status)
@@ -42,12 +45,12 @@ export default async function PayPage({ params }: { params: Promise<{ id: string
     .from('payments')
     .select('amount')
     .eq('loan_id', id)
+const totalPaid = (priorPayments ?? []).reduce((s, p) => s + Number(p.amount), 0)
+  const totalLateFees = (installments ?? []).reduce((s, i) => s + Number(i.late_fee ?? 0), 0)
+  const outstanding = Math.max(0, Number(loan.total_repayable) + totalLateFees - totalPaid)
 
-  const totalPaid = (priorPayments ?? []).reduce((s, p) => s + Number(p.amount), 0)
-  const outstanding = Math.max(0, Number(loan.total_repayable) - totalPaid)
-
-  const nextInstallment = (installments ?? []).find(
-    inst => Number(inst.amount_paid) < Number(inst.amount_due)
+const nextInstallment = (installments ?? []).find(
+    inst => Math.round((Number(inst.amount_due) - Number(inst.amount_paid)) * 100) / 100 >= 0.05
   )
 
   // 2. FIX: Explain dead-ends on the page, including the 'approved' pre-disbursement state
@@ -67,16 +70,16 @@ export default async function PayPage({ params }: { params: Promise<{ id: string
         : loan.status === 'approved' ? 'This loan has been approved but not yet disbursed. Payments will be accepted once funds are released.'
         : 'This loan is not open for payment processing at this time.',
     }
-  } else if (!nextInstallment || outstanding <= 0) {
+} else if (!nextInstallment || outstanding <= 0) {
     blocked = {
-      title: 'Nothing left to pay',
-      body: 'All installments on this loan are paid in full. This page should update shortly.',
+      title: 'You\'re all paid up! 🎉',
+      body: 'Every installment on this loan has been settled. Your repayment record is looking great — keep it up!',
     }
   }
 
-  const installmentDue = blocked
+const installmentDue = blocked
     ? 0
-    : Math.max(0, Number(nextInstallment!.amount_due) - Number(nextInstallment!.amount_paid))
+    : Math.max(0, Number(nextInstallment!.amount_due) + Number(nextInstallment!.late_fee ?? 0) - Number(nextInstallment!.amount_paid))
 
   const payAction = blocked ? null : submitPayment.bind(null, id, nextInstallment!.id)
   const progressPct = Math.min(100, Math.round((totalPaid / Number(loan.total_repayable || 1)) * 100))
@@ -171,17 +174,30 @@ export default async function PayPage({ params }: { params: Promise<{ id: string
         </header>
 
         <main className="max-w-lg mx-auto px-6 sm:px-10 py-10">
-          {blocked ? (
-            <div className="ledger-card empty-state">
-              <p className="font-display text-xl mb-2" style={{ color: 'var(--ink)', fontWeight: 500 }}>
+{blocked ? (
+            <div className="ledger-card empty-state" style={{
+              background: (!nextInstallment || outstanding <= 0) ? 'var(--teal-bg)' : 'var(--card)',
+              borderColor: (!nextInstallment || outstanding <= 0) ? 'var(--teal-bdr)' : 'var(--line-md)',
+            }}>
+              <div className="font-display mb-3" style={{ fontSize: 48, lineHeight: 1 }}>
+                {(!nextInstallment || outstanding <= 0) ? '✓' : '⚠'}
+              </div>
+              <p className="font-display text-2xl mb-2" style={{ color: 'var(--ink)', fontWeight: 500 }}>
                 {blocked.title}
               </p>
-              <p className="text-sm mb-6" style={{ color: 'var(--ink-3)' }}>
+              <p className="text-sm mb-6" style={{ color: 'var(--ink-3)', maxWidth: 320, margin: '0 auto 24px' }}>
                 {blocked.body}
               </p>
-              <Link href={`/loans/${id}`} className="btn-ghost" style={{ display: 'inline-flex' }}>
-                Back to loan details
-              </Link>
+              <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                <Link href={`/loans/${id}`} className="btn-ghost" style={{ display: 'inline-flex' }}>
+                  Back to loan details
+                </Link>
+                {(!nextInstallment || outstanding <= 0) && (
+                  <Link href="/dashboard" className="btn-primary" style={{ display: 'inline-flex', width: 'auto' }}>
+                    Go to dashboard →
+                  </Link>
+                )}
+              </div>
             </div>
           ) : (
             <>
