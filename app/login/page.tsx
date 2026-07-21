@@ -6,6 +6,8 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 
+export const dynamic = 'force-dynamic'
+
 export default function LoginPage() {
 const router = useRouter()
   const searchParams = useSearchParams()
