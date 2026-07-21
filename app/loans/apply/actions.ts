@@ -170,8 +170,7 @@ const interestRate = 5 // stored as a whole percentage (5 = 5%), not a decimal
     await generateInstallmentSchedule(supabase, loan.id, totalRepayable, termDays, numInstallments)
   }
 
-  redirect(`/loans/${loan.id}`)
-}
+  redirect(eligible ? `/loans/${loan.id}?applied=1` : `/loans/${loan.id}`)}
 
 async function generateInstallmentSchedule(
   supabase: Awaited<ReturnType<typeof createClient>>,

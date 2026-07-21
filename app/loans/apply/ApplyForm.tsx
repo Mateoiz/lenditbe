@@ -432,8 +432,12 @@ export default function ApplyForm({
                   Send my loan to
                 </span>
 
-                {!useCustomPayout && hasSavedPayout && (
+{!useCustomPayout && hasSavedPayout && (
                   <>
+                    <input type="hidden" name="payout_method" value={savedPayout.method ?? ''} />
+                    <input type="hidden" name="payout_account_name" value={savedPayout.accountName ?? ''} />
+                    <input type="hidden" name="payout_account_number" value={savedPayout.accountNumber ?? ''} />
+
                     <div className="payout-summary">
                       <div>
                         <div className="text-sm" style={{ color: 'var(--teal-dark)', fontWeight: 600 }}>
@@ -456,7 +460,6 @@ export default function ApplyForm({
                     </span>
                   </>
                 )}
-
                 {useCustomPayout && (
                   <div className="flex flex-col gap-3">
                     {hasSavedPayout && (

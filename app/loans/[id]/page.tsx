@@ -2,6 +2,7 @@
 import Link from 'next/link'
 import { redirect, notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import LoanConfirmedAnimation from './LoanConfirmedAnimation'
 
 function peso(n: number) {
   return `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -33,8 +34,15 @@ const INST_META: Record<string, { label: string; color: string; dot: string }> =
   overdue:  { label: 'Overdue',  color: 'var(--magenta)',       dot: 'var(--magenta)' },
 }
 
-export default async function LoanDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function LoanDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>
+  searchParams: Promise<{ applied?: string }>
+}) {
   const { id } = await params
+  const { applied } = await searchParams
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
@@ -115,6 +123,8 @@ const canPay = ['active', 'disbursed', 'approved', 'overdue'].includes(loan.stat
         .section-label { font-family:'Space Mono',monospace; font-size:10px; font-weight:700;
           letter-spacing:0.1em; text-transform:uppercase; color:var(--ink-4); margin-bottom:12px; }
       `}</style>
+
+{applied === '1' && <LoanConfirmedAnimation amount={peso(loan.principal_amount)} />}
 
       <div className="min-h-screen" style={{ background: 'var(--paper)' }}>
         <header className="flex items-center justify-between px-6 sm:px-10 py-5"
